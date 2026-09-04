@@ -20,3 +20,11 @@ __pycache__/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# App — security critical
+.env
+app/.env
+app/server/data/
+app/server/node_modules/
+app/web/node_modules/
+app/web/dist/

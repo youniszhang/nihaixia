@@ -1,0 +1,28 @@
+# Caddy configuration
+# DOMAIN env controls TLS: a real domain → automatic Let's Encrypt HTTPS;
+# "localhost" or empty → plain HTTP (local/intranet deployment).
+
+{$DOMAIN:localhost} {
+	encode zstd gzip
+
+	header {
+		-X-Server
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+	}
+
+	# API reverse proxy (flush_interval -1 keeps SSE streaming unbuffered)
+	handle /api/* {
+		reverse_proxy api:8080 {
+			flush_interval -1
+		}
+	}
+
+	# static SPA
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
