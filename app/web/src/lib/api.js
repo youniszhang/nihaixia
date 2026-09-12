@@ -47,6 +47,9 @@ export const api = {
   // admin
   getLlmConfig: () => request('/api/admin/llm'),
   saveLlmConfig: (p) => request('/api/admin/llm', { method: 'PUT', body: p }),
+  openDswebLogin: () => request('/api/admin/dsweb/open-login', { method: 'POST' }),
+  checkDswebLogin: () => request('/api/admin/dsweb/check-login'),
+  killDswebBrowser: () => request('/api/admin/dsweb/kill-browser', { method: 'POST' }),
 
   // sessions
   listSessions: () => request('/api/sessions'),

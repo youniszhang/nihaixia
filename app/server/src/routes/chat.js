@@ -3,6 +3,7 @@ import { sendError, clamp } from '../lib/validate.js';
 import { retrieve } from '../knowledge/loader.js';
 import { SYSTEM_PROMPT, buildRagBlock } from '../knowledge/system-prompt.js';
 import { streamChat } from '../llm.js';
+import { connectDeepSeek, askStream } from '../lib/dsweb.js';
 import config from '../config.js';
 
 function sse(res, data) {
@@ -71,6 +72,8 @@ export default async function chatRoutes(fastify) {
     }
 
     const profile = getProfile(req.user.id);
+    const provider = getSetting('llm_provider') === 'dsweb' ? 'dsweb' : 'api';
+
     const chunks = retrieve(content + '\n' + activePin, 8);
     const sysContent = SYSTEM_PROMPT
       + (activePin ? '\n\n【本次问诊固定背景（十问/舌象等摘录）】\n' + activePin : '')
@@ -85,15 +88,44 @@ export default async function chatRoutes(fastify) {
     let full = '';
     try {
       sse(reply, { type: 'start', user_msg_id: userMsgId });
-      // Admin panel settings (DB) take priority over .env defaults
-      const llmCfg = {
-        apiKey: getSetting('llm_api_key') || config.llm.apiKey,
-        baseUrl: getSetting('llm_base_url') || config.llm.baseUrl,
-        model: getSetting('llm_model') || config.llm.model,
-      };
-      for await (const delta of streamChat(messages, abortController.signal, llmCfg)) {
-        full += delta;
-        sse(reply, { type: 'delta', text: delta });
+      if (provider === 'dsweb') {
+        // —— 网页版 DeepSeek（0 Token）：把系统指令与问诊上下文并入单条网页消息 ——
+        const dsPort = Number(getSetting('dsweb_port') || 9223);
+        const dsExpert = getSetting('dsweb_expert') !== 'false';
+        const compactRag = chunks.length
+          ? chunks.map((c, i) => `〔摘录${i + 1}〕${(c.content || '').slice(0, 400)}`).join('\n')
+          : '';
+        const webPrompt = [
+          '【角色设定】' + SYSTEM_PROMPT.split('【输出格式')[0].slice(0, 1200),
+          activePin ? '【问诊背景】\n' + activePin : '',
+          profileBlock(profile),
+          compactRag ? '【知识库摘录（回答时参考，禁止照抄）】\n' + compactRag : '',
+          '【病人发言】\n' + content,
+        ].filter(Boolean).join('\n\n');
+        const client = await connectDeepSeek(dsPort, false);
+        try {
+          for await (const ev of askStream(client, { prompt: webPrompt, expertMode: dsExpert })) {
+            if (ev.type === 'delta') {
+              full += ev.text;
+              sse(reply, { type: 'delta', text: ev.text });
+            } else if (ev.type === 'done') {
+              break;
+            }
+          }
+        } finally {
+          client.close();
+        }
+      } else {
+        // —— API 模式（OpenAI 兼容）。Admin panel settings (DB) take priority over .env ——
+        const llmCfg = {
+          apiKey: getSetting('llm_api_key') || config.llm.apiKey,
+          baseUrl: getSetting('llm_base_url') || config.llm.baseUrl,
+          model: getSetting('llm_model') || config.llm.model,
+        };
+        for await (const delta of streamChat(messages, abortController.signal, llmCfg)) {
+          full += delta;
+          sse(reply, { type: 'delta', text: delta });
+        }
       }
       const asstId = addMessage(sessionId, 'assistant', full);
       touchSession(sessionId);
@@ -101,7 +133,12 @@ export default async function chatRoutes(fastify) {
     } catch (err) {
       fastify.log.warn({ err: String(err) }, 'chat generation failed');
       const msg =
-        err.code === 'no_api_key' ? '服务器未配置 LLM_API_KEY，请联系管理员。'
+        provider === 'dsweb' ? (
+          /未找到 Chrome|浏览器|登录|输入框|超时|风控/.test(String(err))
+            ? '网页版 DeepSeek 调用失败：' + (err.message || String(err)).slice(0, 160) + '（管理员可在「模型设置」中打开浏览器重新登录）'
+            : '网页版 DeepSeek 调用失败，请检查是否已在「模型设置」中完成登录。'
+        )
+        : err.code === 'no_api_key' ? '未配置模型：请管理员在「模型设置」中填写 API Key，或切换到网页版 DeepSeek（0 Token）模式。'
         : err.code === 'auth' ? '模型服务鉴权失败（API Key 无效）。'
         : err.code === 'rate_limit' ? '模型服务繁忙，请稍后重试。'
         : '模型服务暂不可用，请稍后再试。';

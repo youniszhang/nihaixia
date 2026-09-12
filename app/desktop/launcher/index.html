@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>倪海厦中医问诊</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #f0ece2 0%, #f5f3ef 100%);
+    color: #2c2c2c;
+  }
+  .box { text-align: center; }
+  .seal {
+    width: 84px; height: 84px; line-height: 84px; margin: 0 auto 20px;
+    background: #fff; border: 2px solid #e5e0d8; border-radius: 50%;
+    font-size: 2.6rem; font-weight: 800; color: #b03a2e;
+    box-shadow: 0 8px 32px rgba(0,0,0,.08);
+  }
+  h1 { font-size: 1.2rem; font-weight: 700; margin-bottom: 14px; }
+  #status { font-size: .85rem; color: #6b6b6b; min-height: 20px; }
+  .spinner {
+    width: 26px; height: 26px; margin: 18px auto 0;
+    border: 3px solid #e5e0d8; border-top-color: #b03a2e; border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div class="box">
+    <div class="seal">医</div>
+    <h1>倪海厦中医问诊</h1>
+    <div id="status">正在启动…</div>
+    <div class="spinner"></div>
+  </div>
+</body>
+</html>

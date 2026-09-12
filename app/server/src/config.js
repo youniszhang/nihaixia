@@ -2,13 +2,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+let __dirnameSafe = '.';
+try {
+  __dirnameSafe = path.dirname(fileURLToPath(import.meta.url));
+} catch { /* SEA/CJS bundle: import.meta unavailable → use cwd-relative defaults */ }
 
 const config = {
   port: Number(process.env.PORT || 8080),
   host: process.env.HOST || '0.0.0.0',
-  dbPath: process.env.DB_PATH || path.join(__dirname, '../data/nihaixia.db'),
-  knowledgeDir: process.env.KNOWLEDGE_DIR || path.resolve(__dirname, '../knowledge'),
+  dbPath: process.env.DB_PATH || path.join(__dirnameSafe, '../data/nihaixia.db'),
+  knowledgeDir: process.env.KNOWLEDGE_DIR || path.resolve(__dirnameSafe, '../knowledge'),
   secret: process.env.APP_SECRET || crypto.randomBytes(32).toString('hex'),
 
   // LLM provider (OpenAI-compatible, e.g. DeepSeek)

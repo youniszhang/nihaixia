@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "nihaixia",
+  "version": "1.0.0",
+  "identifier": "com.nihaixia.desktop",
+  "build": {
+    "frontendDist": "../launcher"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "倪海厦中医问诊",
+        "width": 1280,
+        "height": 840,
+        "minWidth": 420,
+        "minHeight": 600,
+        "url": "index.html"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": ["icons/icon.icns"],
+    "resources": {
+      "binaries/nihaixia-node": "binaries/nihaixia-node",
+      "binaries/sea.cjs": "binaries/sea.cjs",
+      "knowledge/": "knowledge/"
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
+  }
+}

@@ -4,12 +4,16 @@
 
 ## 功能
 
-- **用户注册 / 登录**：JWT + HttpOnly Cookie，密码 argon2 加盐哈希存储；第一个注册的用户自动成为管理员
+- **用户注册 / 登录**：JWT + HttpOnly Cookie，scrypt 加盐哈希（兼容历史 argon2 哈希）；第一个注册的用户自动成为管理员
 - **问诊会话**：类 DeepSeek 侧边栏会话列表，问诊记录云端持久化（SQLite）
 - **流式回答**：SSE 流式输出，倪海厦口吻 + 六经辨证 + 经方条文卡片
 - **中医问诊单**：主诉 + 十问 + 舌象/脉象快速勾选，自动生成结构化摘要随会话固定携带
 - **体质档案**：性别/年龄/身高体重/基础疾病，问诊时自动注入 AI 上下文
-- **可视化模型配置（管理员）**：侧边栏「⚙️ 模型设置」在线填写 Base URL / 模型 / API Key，保存即生效，无需重启；Key 只存服务器数据库，前端只见打码值
+- **双模型通道**：
+  - **API Key 模式**：任意 OpenAI 兼容服务（DeepSeek/Kimi/通义/vLLM）
+  - **网页版 DeepSeek（0 Token）**：CDP 驱动专用浏览器登录 chat.deepseek.com，直接走网页版对话额度，不消耗 API Token（桌面/本机推荐）
+- **可视化模型配置（管理员）**：侧边栏「⚙️ 模型设置」在线切换接入方式、填写配置，保存即生效；Key 只存服务器，前端只见打码值
+- **macOS 桌面版（Tauri DMG）**：内置本地服务端与知识库，双击即用，数据存本机
 - **免责警示**：首次使用须勾选同意「使用须知」；每条 AI 回复下方附生成内容标注；输入区常驻急症就医提醒
 - **响应式**：PC 端侧边栏布局，移动端抽屉式菜单 + 底部输入框
 - **知识检索**：本地 RAG（字二元组 + 关键词打分）从 6,000+ 知识块检索相关条文注入提示词
@@ -78,11 +82,29 @@ npm run dev                               # http://localhost:5173
 
 部署后用**第一个注册的账号**登录（该账号自动成为管理员），侧边栏点「⚙️ 模型设置」：
 
-- **接口地址 Base URL**：如 `https://api.deepseek.com`（任何 OpenAI 兼容服务均可：Kimi、通义、vLLM 等）
+**方式一：API Key 模式**（服务器部署推荐）
+- **接口地址 Base URL**：如 `https://api.deepseek.com`（任何 OpenAI 兼容服务均可）
 - **模型名称**：如 `deepseek-chat`
 - **API Key**：保存即生效，无需重启；已保存时留空表示不修改
 
+**方式二：网页版 DeepSeek（0 Token，本机/桌面版推荐）**
+- 点「🌐 打开浏览器登录」→ 在弹出的专用浏览器窗口登录 chat.deepseek.com（登录一次长期有效）
+- 点「🔍 检测登录状态」确认后即可问诊——对话直接走网页版额度，**不消耗 API Token**
+- 原理：内置 CDP 驱动（参考 obsidian-ai-explainer），自动注入倪师提示词与问诊上下文并发送、抓取网页版回复
+- 注意：需本机安装 Chrome/Edge；网页版有频率与风控限制；此方式仅在桌面版/本机服务可用（服务器无显示环境无法登录）
+
 配置优先级：数据库配置（面板）> `.env` 环境变量。也可用 `ADMIN_USERNAME` 环境变量指定管理员用户名。
+
+### macOS 桌面版（DMG）
+
+```bash
+cd desktop
+npm install
+npm run build        # 构建 sidecar + Tauri DMG
+# 产物: src-tauri/target/release/bundle/dmg/nihaixia_1.0.0_aarch64.dmg
+```
+
+桌面版特点：双击即用、无需 Docker；本地服务端与 SQLite 数据都存在本机（`~/Library/Application Support/com.nihaixia.desktop/`）；「网页版 DeepSeek」0 Token 问诊开箱可用。注意：桌面版未做 Apple 公证，首次打开需右键 →「打开」绕过 Gatekeeper。
 
 ### 环境变量
 

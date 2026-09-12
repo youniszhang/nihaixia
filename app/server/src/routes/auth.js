@@ -1,5 +1,5 @@
-import argon2 from 'argon2';
 import { createUser, findUserByName, findUserById, getSetting, setSetting, isAdminUser } from '../db.js';
+import { hashPassword, verifyPassword } from '../lib/password.js';
 import { issueToken, cookieOptions } from '../lib/auth.js';
 import { isValidUsername, isValidPassword, sendError, clamp } from '../lib/validate.js';
 
@@ -17,7 +17,7 @@ export default async function authRoutes(fastify) {
     const name = username.trim();
     if (findUserByName(name)) return sendError(reply, 'username_taken', '该用户名已被注册', 409);
 
-    const hash = await argon2.hash(password, { type: argon2.argon2id });
+    const hash = await hashPassword(password);
     const user = createUser(name, hash);
     // First registered user automatically becomes admin
     if (getSetting('admin_user_id') == null) setSetting('admin_user_id', String(user.id));
@@ -33,7 +33,7 @@ export default async function authRoutes(fastify) {
     }
     const user = findUserByName(username.trim());
     if (!user) return sendError(reply, 'bad_credentials', '用户名或密码不正确', 401);
-    const ok = await argon2.verify(user.password_hash, password).catch(() => false);
+    const ok = await verifyPassword(password, user.password_hash);
     if (!ok) return sendError(reply, 'bad_credentials', '用户名或密码不正确', 401);
     const token = issueToken(user);
     reply.setCookie('nhx_token', token, cookieOptions);
