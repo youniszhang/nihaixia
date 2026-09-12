@@ -116,6 +116,7 @@ fn main() {
                 let node_bin = res_dir.join("binaries").join("nihaixia-node");
                 let sea_cjs = res_dir.join("binaries").join("sea.cjs");
                 let knowledge = res_dir.join("knowledge");
+                let web_dist = res_dir.join("web-dist");
 
                 if !node_bin.exists() || !sea_cjs.exists() {
                     report_status(&window, "未找到内置服务端文件（安装包损坏？）");
@@ -156,6 +157,7 @@ fn main() {
                     .env("HOST", "127.0.0.1")
                     .env("DB_PATH", data_dir.join("nihaixia.db"))
                     .env("KNOWLEDGE_DIR", &knowledge)
+                    .env("STATIC_DIR", &web_dist)
                     .env("APP_SECRET", secret)
                     .env("ALLOW_NO_LLM", "true")
                     .stdout(log.unwrap_or_else(|| std::fs::File::create("/dev/null").unwrap()))

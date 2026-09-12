@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
+import fastifyStatic from '@fastify/static';
 import config from './config.js';
 import { createAuthenticate } from './lib/auth.js';
 import authRoutes from './routes/auth.js';
@@ -48,6 +49,18 @@ export async function startServer() {
   await app.register(adminRoutes, { prefix: '/api/admin' });
 
   app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
+
+  // 桌面模式：本地服务端直接托管前端静态文件（服务器部署时由 Caddy 托管）
+  if (process.env.STATIC_DIR) {
+    await app.register(fastifyStatic, { root: process.env.STATIC_DIR });
+    // SPA 回退：非 /api 的 GET 路由全部返回 index.html
+    app.setNotFoundHandler((req, reply) => {
+      if (req.method === 'GET' && !req.url.startsWith('/api')) {
+        return reply.sendFile('index.html');
+      }
+      return reply.code(404).send({ message: `Route ${req.method}:${req.url} not found`, error: 'Not Found', statusCode: 404 });
+    });
+  }
 
   if (!config.llm.apiKey && process.env.ALLOW_NO_LLM !== 'true') {
     app.log.warn('LLM_API_KEY 未配置 — 启动完成但对话接口将返回错误（可在管理面板配置）');

@@ -29,7 +29,8 @@
     "resources": {
       "binaries/nihaixia-node": "binaries/nihaixia-node",
       "binaries/sea.cjs": "binaries/sea.cjs",
-      "knowledge/": "knowledge/"
+      "knowledge/": "knowledge/",
+      "web-dist/": "web-dist/"
     },
     "macOS": {
       "minimumSystemVersion": "10.15"
