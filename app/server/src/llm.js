@@ -10,7 +10,10 @@ export async function* streamChat(messages, signal, cfg) {
     e.code = 'no_api_key';
     throw e;
   }
-  const url = llm.baseUrl.replace(/\/+$/, '') + '/v1/chat/completions';
+  // baseUrl 规范化：已带 /v1（或 /v2 等）的地址直接拼 /chat/completions，
+  // 否则补 /v1 前缀（兼容 https://api.deepseek.com 与 https://xxx/v1 两种写法）
+  const base = llm.baseUrl.replace(/\/+$/, '');
+  const url = /\/v\d+$/.test(base) ? base + '/chat/completions' : base + '/v1/chat/completions';
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error('LLM 请求超时')), config.llm.timeoutMs);
   if (signal) signal.addEventListener('abort', () => controller.abort(), { once: true });
