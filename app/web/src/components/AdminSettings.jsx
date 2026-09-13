@@ -84,10 +84,10 @@ export default function AdminSettings({ onClose }) {
     finally { setDsBusy(false); }
   }
 
-  // 应用内登录：打开内嵌 DeepSeek 登录窗口，登录成功自动注入专用浏览器
+  // 应用内登录：前端发起 → Tauri 事件开窗 → Rust 轮询 token → 内部通道注入 → 状态轮询
   async function inAppLogin() {
     const t = window.__TAURI__;
-    if (!t?.core?.invoke) { setErr('应用内登录仅桌面版可用'); return; }
+    if (!t?.event?.emit) { setErr('应用内登录仅桌面版可用'); return; }
     setDsBusy(true); setDsStatus(''); setErr('');
     try {
       await api.saveLlmConfig({
@@ -95,23 +95,25 @@ export default function AdminSettings({ onClose }) {
         dsweb_port: Number(cfg.dsweb_port) || 9223,
         dsweb_expert: !!cfg.dsweb_expert,
       });
-      await t.core.invoke('open_ds_login');
+      await api.startInAppLogin();
+      await t.event.emit('ds-login-open', {});
       setDsStatus('已在应用内打开登录窗口，请完成登录（支持扫码/账号）。成功后自动生效…');
-      for (let i = 0; i < 120; i++) {
+      for (let i = 0; i < 130; i++) {
         await new Promise((r) => setTimeout(r, 2000));
-        if (!window.__TAURI__) break;
-        const token = await t.core.invoke('read_ds_login_token');
-        if (token) {
-          const r = await api.injectDsToken(token);
-          if (r.loggedIn) {
-            await t.core.invoke('close_ds_login');
-            setDsStatus('✅ 登录成功！专用浏览器已就绪，0 Token 问诊可用。');
-            return;
-          }
-          // token 还没生效（页面刚跳转等），继续轮询
+        const st = await api.inAppLoginStatus();
+        if (st.state === 'success') {
+          setDsStatus('✅ 登录成功！专用浏览器已就绪，0 Token 问诊可用。');
+          return;
+        }
+        if (st.state === 'failed') {
+          setDsStatus('⚠️ 登录未生效（校验失败），请重试一次。');
+          return;
+        }
+        if (st.state === 'timeout') {
+          setDsStatus('等待登录超时（4 分钟）。请重试，或用「打开浏览器登录」。');
+          return;
         }
       }
-      setDsStatus('等待登录超时（4 分钟）。请重试，或用「打开浏览器登录」在浏览器里登录。');
     } catch (e2) {
       setErr('应用内登录失败：' + (e2.message || e2));
     } finally {

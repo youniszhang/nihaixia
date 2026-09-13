@@ -51,6 +51,8 @@ export const api = {
   checkDswebLogin: () => request('/api/admin/dsweb/check-login'),
   killDswebBrowser: () => request('/api/admin/dsweb/kill-browser', { method: 'POST' }),
   injectDsToken: (token) => request('/api/admin/dsweb/inject-token', { method: 'POST', body: { token } }),
+  startInAppLogin: () => request('/api/admin/dsweb/in-app-login-start', { method: 'POST' }),
+  inAppLoginStatus: () => request('/api/admin/dsweb/in-app-login-status'),
 
   // sessions
   listSessions: () => request('/api/sessions'),

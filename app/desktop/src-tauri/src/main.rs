@@ -3,7 +3,10 @@
 //! 桌面启动器：
 //! 1. 启动打包在资源目录里的本地服务端（node 二进制 + sea.cjs bundle）
 //! 2. 轮询 /health 就绪后，把主窗口导航到 http://127.0.0.1:{PORT}
-//! 3. 应用退出时回收服务端进程
+//! 3. 监听 "ds-login-open" 事件：打开内嵌 DeepSeek 登录窗口，
+//!    轮询其 localStorage 的 userToken（经 window.title 中转），
+//!    拿到后走内部通道（x-internal-token）交给服务端注入专用浏览器
+//! 4. 应用退出时回收服务端进程
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -12,7 +15,7 @@ use std::process::{Child, Command};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use tauri::Manager;
+use tauri::{Listener, Manager};
 
 const PORT: u16 = 8137;
 
@@ -57,13 +60,13 @@ fn set_executable(path: &PathBuf) {
 fn report_status(window: &tauri::WebviewWindow, text: &str) {
     let js = format!(
         "document.getElementById('status') && (document.getElementById('status').textContent = {});",
-        serde_json_like_string(text)
+        json_string(text)
     );
     let _ = window.eval(&js);
 }
 
 // 简单的 JSON 字符串转义（避免引入 serde_json）
-fn serde_json_like_string(s: &str) -> String {
+fn json_string(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
         match c {
@@ -82,31 +85,19 @@ fn serde_json_like_string(s: &str) -> String {
 
 struct ServerChild(Mutex<Option<Child>>);
 
-// —— 应用内 DeepSeek 登录窗口 ——
-// 用户在内嵌 WKWebView 里登录 chat.deepseek.com；
-// 前端轮询 read_ds_login_token（经 window.title 中转读取 localStorage），
-// 拿到 token 后交给服务端注入专用浏览器。
-
-#[tauri::command]
-fn open_ds_login(app: tauri::AppHandle) -> Result<(), String> {
-    use tauri::{WebviewUrl, WebviewWindowBuilder};
-    if let Some(w) = app.get_webview_window("dslogin") {
-        let _ = w.close();
-        std::thread::sleep(Duration::from_millis(400));
+fn kill_child(state: &ServerChild) {
+    if let Ok(mut guard) = state.0.lock() {
+        if let Some(child) = guard.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        *guard = None;
     }
-    let url: tauri::Url = "https://chat.deepseek.com/sign_in"
-        .parse()
-        .map_err(|e| format!("{e}"))?;
-    tauri::WebviewWindowBuilder::new(&app, "dslogin", WebviewUrl::External(url))
-        .title("DeepSeek 网页版登录 · 登录后自动生效")
-        .inner_size(1100.0, 800.0)
-        .build()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-fn read_ds_login_token(app: tauri::AppHandle) -> String {
+// —— 应用内 DeepSeek 登录 —— //
+
+fn read_title_token(app: &tauri::AppHandle) -> String {
     let Some(w) = app.get_webview_window("dslogin") else {
         return String::new();
     };
@@ -124,35 +115,85 @@ fn read_ds_login_token(app: tauri::AppHandle) -> String {
     String::new()
 }
 
-#[tauri::command]
-fn close_ds_login(app: tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("dslogin") {
-        let _ = w.close();
-    }
-}
-
-fn kill_child(state: &ServerChild) {
-    if let Ok(mut guard) = state.0.lock() {
-        if let Some(child) = guard.as_mut() {
-            let _ = child.kill();
-            let _ = child.wait();
+fn http_post_internal(path: &str, body: &str, internal_token: &str) -> Option<String> {
+    if let Ok(mut s) = TcpStream::connect(("127.0.0.1", PORT)) {
+        s.set_read_timeout(Some(Duration::from_secs(120))).ok();
+        s.set_write_timeout(Some(Duration::from_secs(30))).ok();
+        let req = format!(
+            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{PORT}\r\nx-internal-token: {internal_token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        if s.write_all(req.as_bytes()).is_ok() {
+            let mut buf = String::new();
+            let _ = s.read_to_string(&mut buf);
+            return Some(buf);
         }
-        *guard = None;
     }
+    None
 }
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![
-            open_ds_login,
-            read_ds_login_token,
-            close_ds_login
-        ])
         .manage(ServerChild(Mutex::new(None)))
         .setup(move |app| {
             let handle = app.handle().clone();
             let window = handle.get_webview_window("main").expect("main window");
 
+            // —— 应用内登录事件：前端 emit("ds-login-open") 触发 —— //
+            let h_login = handle.clone();
+            handle.listen("ds-login-open", move |_| {
+                let app = h_login.clone();
+                std::thread::spawn(move || {
+                    use tauri::{WebviewUrl, WebviewWindowBuilder};
+                    if let Some(w) = app.get_webview_window("dslogin") {
+                        let _ = w.close();
+                        std::thread::sleep(Duration::from_millis(400));
+                    }
+                    let url: tauri::Url = match "https://chat.deepseek.com/sign_in".parse() {
+                        Ok(u) => u,
+                        Err(_) => return,
+                    };
+                    if tauri::WebviewWindowBuilder::new(&app, "dslogin", WebviewUrl::External(url))
+                        .title("DeepSeek 网页版登录 · 登录后自动生效")
+                        .inner_size(1100.0, 800.0)
+                        .build()
+                        .is_err()
+                    {
+                        return;
+                    }
+                    let internal_token = std::env::var("INTERNAL_TOKEN").unwrap_or_default();
+                    if internal_token.is_empty() {
+                        return;
+                    }
+                    // 轮询登录窗口的 userToken，拿到后走内部通道注入并验证（最长 5 分钟）
+                    for _ in 0..150 {
+                        std::thread::sleep(Duration::from_millis(2000));
+                        if app.get_webview_window("dslogin").is_none() {
+                            break; // 用户手动关了窗口
+                        }
+                        let token = read_title_token(&app);
+                        if token.is_empty() {
+                            continue;
+                        }
+                        let body = format!("{{\"token\":{}}}", json_string(&token));
+                        if let Some(resp) = http_post_internal(
+                            "/internal/dsweb-inject",
+                            &body,
+                            &internal_token,
+                        ) {
+                            if resp.contains("\"state\":\"success\"") {
+                                if let Some(w) = app.get_webview_window("dslogin") {
+                                    let _ = w.close();
+                                }
+                                break;
+                            }
+                        }
+                    }
+                });
+            });
+
+            // —— 服务端启动 —— //
             std::thread::spawn(move || {
                 let res_dir = match handle.path().resource_dir() {
                     Ok(d) => d,
@@ -178,7 +219,6 @@ fn main() {
                 }
                 set_executable(&node_bin);
 
-                // 服务已在跑（重复开应用）→ 直接复用
                 if http_ok(PORT) {
                     let _ = window.eval(&format!(
                         "window.location.replace('http://127.0.0.1:{PORT}/')"
@@ -186,22 +226,38 @@ fn main() {
                     return;
                 }
 
-                // APP_SECRET 首次生成并持久化，保证重启后登录态不丢
                 let secret_file = data_dir.join("app_secret");
                 let secret = match std::fs::read_to_string(&secret_file) {
                     Ok(s) if !s.trim().is_empty() => s.trim().to_string(),
                     _ => {
-                        let s = uuid::Uuid::new_v4().to_string().replace('-', "") + &uuid::Uuid::new_v4().to_string().replace('-', "");
+                        let s = uuid::Uuid::new_v4().to_string().replace('-', "")
+                            + &uuid::Uuid::new_v4().to_string().replace('-', "");
                         let _ = std::fs::write(&secret_file, &s);
                         s
                     }
                 };
+                // 内部通道令牌（Rust ↔ 服务端），每次启动随机
+                let internal_token = uuid::Uuid::new_v4().to_string().replace('-', "")
+                    + &uuid::Uuid::new_v4().to_string().replace('-', "");
+                std::env::set_var("INTERNAL_TOKEN", &internal_token);
 
                 let log_file = data_dir.join("server.log");
                 let log = std::fs::OpenOptions::new()
-                    .create(true).write(true).truncate(true)
-                    .open(&log_file).ok();
-                let err_log = log.as_ref().and_then(|_| std::fs::OpenOptions::new().create(true).write(true).truncate(true).open(&log_file).ok());
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(&log_file)
+                    .ok();
+                let err_log = log
+                    .as_ref()
+                    .and_then(|_| {
+                        std::fs::OpenOptions::new()
+                            .create(true)
+                            .write(true)
+                            .truncate(true)
+                            .open(&log_file)
+                            .ok()
+                    });
 
                 report_status(&window, "正在启动本地服务…");
 
@@ -213,6 +269,7 @@ fn main() {
                     .env("KNOWLEDGE_DIR", &knowledge)
                     .env("STATIC_DIR", &web_dist)
                     .env("APP_SECRET", secret)
+                    .env("INTERNAL_TOKEN", &internal_token)
                     .env("ALLOW_NO_LLM", "true")
                     .stdout(log.unwrap_or_else(|| std::fs::File::create("/dev/null").unwrap()))
                     .stderr(err_log.unwrap_or_else(|| std::fs::File::create("/dev/null").unwrap()))

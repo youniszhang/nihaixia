@@ -1,6 +1,7 @@
 import { getSetting, setSetting, isAdminUser } from '../db.js';
 import { sendError, clamp } from '../lib/validate.js';
 import { openLoginWindow, checkLoginStatus, killBrowser, injectToken } from '../lib/dsweb.js';
+import { startInAppLoginFlow, inAppLoginStatus } from './internal.js';
 
 function maskKey(key) {
   if (!key) return '';
@@ -81,6 +82,18 @@ export default async function adminRoutes(fastify) {
     if (!isAdminUser(req.user)) return sendError(reply, 'forbidden', '仅管理员可访问', 403);
     killBrowser();
     return { ok: true };
+  });
+
+  // 应用内登录流程：前端发起 → Tauri 事件开窗 → Rust 轮询 token 走内部通道注入
+  fastify.post('/dsweb/in-app-login-start', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+    if (!isAdminUser(req.user)) return sendError(reply, 'forbidden', '仅管理员可访问', 403);
+    startInAppLoginFlow();
+    return { ok: true };
+  });
+
+  fastify.get('/dsweb/in-app-login-status', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+    if (!isAdminUser(req.user)) return sendError(reply, 'forbidden', '仅管理员可访问', 403);
+    return inAppLoginStatus();
   });
 
   // 应用内登录窗口获取到 userToken 后，写入专用浏览器并验证
