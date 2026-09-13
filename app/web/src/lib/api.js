@@ -53,6 +53,7 @@ export const api = {
   injectDsToken: (token) => request('/api/admin/dsweb/inject-token', { method: 'POST', body: { token } }),
   startInAppLogin: () => request('/api/admin/dsweb/in-app-login-start', { method: 'POST' }),
   inAppLoginStatus: () => request('/api/admin/dsweb/in-app-login-status'),
+  lanInfo: () => request('/api/lan-info'),
 
   // sessions
   listSessions: () => request('/api/sessions'),

@@ -264,7 +264,8 @@ fn main() {
                 let child = Command::new(&node_bin)
                     .arg(&sea_cjs)
                     .env("PORT", PORT.to_string())
-                    .env("HOST", "127.0.0.1")
+                    // 0.0.0.0：允许同一 Wi-Fi 下的 iPhone/iPad 通过 PWA 访问
+                    .env("HOST", "0.0.0.0")
                     .env("DB_PATH", data_dir.join("nihaixia.db"))
                     .env("KNOWLEDGE_DIR", &knowledge)
                     .env("STATIC_DIR", &web_dist)

@@ -106,6 +106,19 @@ npm run build        # 构建 sidecar + Tauri DMG
 
 桌面版特点：双击即用、无需 Docker；本地服务端与 SQLite 数据都存在本机（`~/Library/Application Support/com.nihaixia.desktop/`）；「网页版 DeepSeek」0 Token 问诊开箱可用。注意：桌面版未做 Apple 公证，首次打开需右键 →「打开」绕过 Gatekeeper。
 
+### iPhone / iPad 使用（无需 App Store）
+
+桌面版已内置局域网服务（0.0.0.0 监听）。安装 iOS 原生侧载受系统限制（禁止运行打包的可执行程序、个人签名 7 天过期），因此采用标准 **PWA 添加到主屏幕** 方案：
+
+1. 电脑打开桌面版，侧边栏点「📱 手机访问」，显示局域网地址和二维码
+2. iPhone 连接**同一 Wi-Fi**，Safari 扫码（或手动输入地址）
+3. 登录后点 Safari 底部「分享」→「添加到主屏幕」——得到独立图标的全屏 App
+
+说明：
+- 手机端与电脑端共用同一服务与数据，问诊记录实时同步
+- 网页版 DeepSeek（0 Token）的浏览器跑在电脑上，手机端发起问诊同样可用
+- macOS 首次可能弹防火墙授权，点「允许」；请勿在公共 Wi-Fi 下开放使用
+
 ### 环境变量
 
 | 变量 | 必填 | 说明 |

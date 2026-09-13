@@ -6,6 +6,7 @@ import ProfileForm from './ProfileForm.jsx';
 import IntakeSheet from './IntakeSheet.jsx';
 import Sidebar from './Sidebar.jsx';
 import AdminSettings from './AdminSettings.jsx';
+import LanAccess from './LanAccess.jsx';
 import DisclaimerModal from './DisclaimerModal.jsx';
 
 const DISCLAIMER_SEEN_KEY = 'nhx_disclaimer_accepted_v1';
@@ -21,6 +22,7 @@ export default function ChatPage() {
   const [showProfile, setShowProfile] = useState(false);
   const [showIntake, setShowIntake] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showLan, setShowLan] = useState(false);
   const [showDisclaimer, setShowDisclaimer] = useState(
     typeof localStorage !== 'undefined' && !localStorage.getItem(DISCLAIMER_SEEN_KEY)
   );
@@ -160,6 +162,7 @@ export default function ChatPage() {
         user={user}
         onLogout={logout}
         onAdmin={() => setShowAdmin(true)}
+        onLan={() => setShowLan(true)}
         onClose={() => setSidebarOpen(false)}
       />
 
@@ -268,6 +271,15 @@ export default function ChatPage() {
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
             <div className="sheet-head"><h2>模型设置（管理员）</h2><button className="icon-btn" onClick={() => setShowAdmin(false)}>✕</button></div>
             <AdminSettings onClose={() => setShowAdmin(false)} />
+          </div>
+        </div>
+      )}
+
+      {showLan && (
+        <div className="overlay" onClick={() => setShowLan(false)}>
+          <div className="sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="sheet-head"><h2>📱 在 iPhone / iPad 上使用</h2><button className="icon-btn" onClick={() => setShowLan(false)}>✕</button></div>
+            <LanAccess onClose={() => setShowLan(false)} />
           </div>
         </div>
       )}

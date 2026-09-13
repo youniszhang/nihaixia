@@ -3,6 +3,7 @@ import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
+import os from 'node:os';
 import config from './config.js';
 import { createAuthenticate } from './lib/auth.js';
 import authRoutes from './routes/auth.js';
@@ -51,6 +52,20 @@ export async function startServer() {
   await app.register(internalRoutes, { prefix: '/internal' });
 
   app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
+
+  // 手机/PWA 访问：返回本机局域网地址（同一 Wi-Fi 下的 iPhone/iPad 用）
+  app.get('/api/lan-info', { preHandler: [app.authenticate] }, async () => {
+    const urls = [];
+    const ifaces = os.networkInterfaces();
+    for (const addrs of Object.values(ifaces)) {
+      for (const a of addrs || []) {
+        if (a.family === 'IPv4' && !a.internal && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a.address)) {
+          urls.push(`http://${a.address}:${config.port}`);
+        }
+      }
+    }
+    return { urls, host: config.host, port: config.port };
+  });
 
   // 桌面模式：本地服务端直接托管前端静态文件（服务器部署时由 Caddy 托管）
   if (process.env.STATIC_DIR) {

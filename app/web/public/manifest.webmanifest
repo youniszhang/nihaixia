@@ -1,0 +1,17 @@
+{
+  "name": "倪海厦中医问诊",
+  "short_name": "倪海厦问诊",
+  "description": "经方派 AI 问诊助手：六经辨证、经方选药、十问舌象、体质档案",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#f5f3ef",
+  "background_color": "#f5f3ef",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "maskable" }
+  ]
+}
