@@ -127,9 +127,13 @@ export default async function chatRoutes(fastify) {
           sse(reply, { type: 'delta', text: delta });
         }
       }
-      const asstId = addMessage(sessionId, 'assistant', full);
-      touchSession(sessionId);
-      sse(reply, { type: 'done', message_id: asstId });
+      if (full.trim()) {
+        const asstId = addMessage(sessionId, 'assistant', full);
+        touchSession(sessionId);
+        sse(reply, { type: 'done', message_id: asstId });
+      } else {
+        sse(reply, { type: 'error', message: '本次未收到有效回复，请重试。' });
+      }
     } catch (err) {
       fastify.log.warn({ err: String(err) }, 'chat generation failed');
       const msg =

@@ -186,23 +186,31 @@ export default function ChatPage() {
             <EmptyState onIntake={() => setShowIntake(true)} onNew={newSession} />
           ) : (
             <div className="msg-list">
-              {messages.map((m) => (
-                <div key={m.id} className={`msg ${m.role}`}>
-                  <div className="msg-avatar">{m.role === 'user' ? '你' : '倪'}</div>
-                  <div className="msg-body">
-                    {m.role === 'assistant' ? <MarkdownMessage content={m.content} /> : <div className="msg-plain">{m.content}</div>}
-                    {m.role === 'assistant' && m.content && (
-                      <p className="msg-tag">⚠️ 以上内容由 AI 生成，仅供中医学习参考，不构成医疗建议</p>
-                    )}
+              {messages.map((m) => {
+                // 回复占位（还没收到第一个字）：只渲染一个带打字动画的气泡
+                if (m.role === 'assistant' && !m.content) {
+                  if (streaming && m.id === messages[messages.length - 1]?.id) {
+                    return (
+                      <div key={m.id} className="msg assistant">
+                        <div className="msg-avatar">倪</div>
+                        <div className="msg-body typing-dots"><span /><span /><span /></div>
+                      </div>
+                    );
+                  }
+                  return null; // 非流式状态下的空泡不渲染
+                }
+                return (
+                  <div key={m.id} className={`msg ${m.role}`}>
+                    <div className="msg-avatar">{m.role === 'user' ? '你' : '倪'}</div>
+                    <div className="msg-body">
+                      {m.role === 'assistant' ? <MarkdownMessage content={m.content} /> : <div className="msg-plain">{m.content}</div>}
+                      {m.role === 'assistant' && m.content && (
+                        <p className="msg-tag">⚠️ 以上内容由 AI 生成，仅供中医学习参考，不构成医疗建议</p>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
-              {streaming && (
-                <div className="msg assistant">
-                  <div className="msg-avatar">倪</div>
-                  <div className="msg-body typing-dots"><span /><span /><span /></div>
-                </div>
-              )}
+                );
+              })}
             </div>
           )}
           <div ref={scrollRef} />
