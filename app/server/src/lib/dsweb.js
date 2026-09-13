@@ -13,6 +13,32 @@ import { execSync, spawn } from 'node:child_process';
 import { CDPClient, listTargets, newTab } from './cdp.js';
 
 const PROFILE_DIR = path.join(os.tmpdir(), 'nihaixia-dsweb-profile');
+const PIDFILE = path.join(PROFILE_DIR, '.nihaixia-launcher.json');
+
+function readPidfile() {
+  try { return JSON.parse(fs.readFileSync(PIDFILE, 'utf8')); } catch { return null; }
+}
+function writePidfile(info) {
+  try { fs.mkdirSync(PROFILE_DIR, { recursive: true }); fs.writeFileSync(PIDFILE, JSON.stringify(info)); } catch {}
+}
+function pidAlive(pid) {
+  if (!pid) return false;
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+function isOurBrowser(pid) {
+  if (!pid || !pidAlive(pid)) return false;
+  try { return execSync(`ps -p ${pid} -o command=`).toString().includes('nihaixia-dsweb-profile'); } catch { return false; }
+}
+function listenerPid(port) {
+  try { return Number(execSync(`lsof -ti:${port} 2>/dev/null | head -1`).toString().trim()) || null; } catch { return null; }
+}
+async function canList(port) { try { await listTargets(port); return true; } catch { return false; } }
+
+function browserAppName(bin) {
+  if (bin.includes('Edge')) return 'Microsoft Edge';
+  if (bin.includes('Chromium')) return 'Chromium';
+  return 'Google Chrome';
+}
 
 export function findBrowserBinary() {
   const platform = process.platform;
@@ -42,12 +68,29 @@ export function findBrowserBinary() {
   return null;
 }
 
-/** 启动专用浏览器（独立 profile，登录态持久）。已启动则复用。 */
-export async function ensureBrowser(port, headless = false) {
-  try {
-    await listTargets(port);
-    return; // already running
-  } catch { /* not running */ }
+/**
+ * 启动专用浏览器（独立 profile，登录态持久）。返回实际可用的调试端口。
+ * 端口被外来进程占用时自动向后避让；找回我们自己遗留的浏览器时直接复用。
+ */
+export async function ensureBrowser(preferredPort, headless = false) {
+  // 1) pidfile 跟踪的浏览器仍活着且 CDP 可达 → 复用
+  const tracked = readPidfile();
+  if (tracked?.port && isOurBrowser(tracked.pid) && (await canList(tracked.port))) {
+    return tracked.port;
+  }
+  // 2) 端口被占但恰好是我们的浏览器（pidfile 丢失）→ 收编
+  if (await canList(preferredPort)) {
+    const pid = listenerPid(preferredPort);
+    if (isOurBrowser(pid)) {
+      writePidfile({ pid, port: preferredPort });
+      return preferredPort;
+    }
+    // 外来进程占用 → 向后找空闲端口
+    let p = preferredPort + 1;
+    for (let i = 0; i < 25 && (await canList(p)); i++) p++;
+    preferredPort = p;
+  }
+
   const bin = findBrowserBinary();
   if (!bin) throw new Error('未找到 Chrome/Edge，请先安装后重试');
   let proxyFlag = '';
@@ -59,7 +102,7 @@ export async function ensureBrowser(port, headless = false) {
     }
   } catch {}
   const flags = [
-    `--remote-debugging-port=${port}`,
+    `--remote-debugging-port=${preferredPort}`,
     `--user-data-dir=${PROFILE_DIR}`,
     '--no-first-run',
     '--no-default-browser-check',
@@ -72,16 +115,27 @@ export async function ensureBrowser(port, headless = false) {
     detached: true,
     stdio: 'ignore',
   }).unref();
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 24; i++) {
     await new Promise((r) => setTimeout(r, 500));
-    try { await listTargets(port); return; } catch {}
+    if (await canList(preferredPort)) {
+      // 记录真实 chrome 进程 pid（spawn 拿到的是 sh 的）
+      try {
+        const pid = Number(execSync(`pgrep -f "nihaixia-dsweb-profile" | head -1`).toString().trim()) || null;
+        writePidfile({ pid, port: preferredPort });
+      } catch { writePidfile({ pid: null, port: preferredPort }); }
+      // 有头模式把窗口带到前台
+      if (!headless && process.platform === 'darwin') {
+        try { execSync(`osascript -e 'tell application "${browserAppName(bin)}" to activate'`, { stdio: 'ignore' }); } catch {}
+      }
+      return preferredPort;
+    }
   }
   throw new Error('浏览器启动超时（调试端口未就绪）');
 }
 
 /** 连接到 DeepSeek 页面（不存在则新开），并导航到新对话页。 */
-export async function connectDeepSeek(port, headless = false) {
-  await ensureBrowser(port, headless);
+export async function connectDeepSeek(preferredPort, headless = false) {
+  const port = await ensureBrowser(preferredPort, headless);
   let targets = await listTargets(port);
   let target = targets.find((t) => t.url.includes('chat.deepseek.com') && t.webSocketDebuggerUrl && t.type === 'page');
   if (!target) {
@@ -392,13 +446,28 @@ export async function* askStream(client, { prompt, expertMode = true, webSearch 
   );
 }
 
-/** 登录辅助：打开可见窗口供用户登录 */
+/** 登录辅助：打开可见窗口供用户登录（返回实际端口） */
 export async function openLoginWindow(port) {
-  await ensureBrowser(port, false);
-  const targets = await listTargets(port);
+  const actual = await ensureBrowser(port, false);
+  const targets = await listTargets(actual);
   const target = targets.find((t) => t.url.includes('chat.deepseek.com') && t.webSocketDebuggerUrl && t.type === 'page');
-  if (!target) await newTab(port, 'https://chat.deepseek.com/');
-  return { ok: true };
+  if (!target) await newTab(actual, 'https://chat.deepseek.com/sign_in');
+  return { ok: true, port: actual };
+}
+
+/** 把应用内登录窗口拿到的 userToken 写入专用浏览器并验证登录态 */
+export async function injectToken(preferredPort, token) {
+  const port = await ensureBrowser(preferredPort, false);
+  const client = await connectDeepSeek(port, false);
+  try {
+    await client.evaluate(`try { localStorage.setItem('userToken', ${JSON.stringify(token)}); } catch (e) {} true`);
+    await client.send('Page.navigate', { url: 'https://chat.deepseek.com/' });
+    await new Promise((r) => setTimeout(r, 4500));
+    const res = await checkLogin(client);
+    return { ...res, port };
+  } finally {
+    client.close();
+  }
 }
 
 /** 登录检测：连接页面并检查登录态（DeepSeek WAF 拦无头浏览器，必须用有头窗口） */

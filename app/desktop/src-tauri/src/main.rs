@@ -82,6 +82,55 @@ fn serde_json_like_string(s: &str) -> String {
 
 struct ServerChild(Mutex<Option<Child>>);
 
+// —— 应用内 DeepSeek 登录窗口 ——
+// 用户在内嵌 WKWebView 里登录 chat.deepseek.com；
+// 前端轮询 read_ds_login_token（经 window.title 中转读取 localStorage），
+// 拿到 token 后交给服务端注入专用浏览器。
+
+#[tauri::command]
+fn open_ds_login(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+    if let Some(w) = app.get_webview_window("dslogin") {
+        let _ = w.close();
+        std::thread::sleep(Duration::from_millis(400));
+    }
+    let url: tauri::Url = "https://chat.deepseek.com/sign_in"
+        .parse()
+        .map_err(|e| format!("{e}"))?;
+    tauri::WebviewWindowBuilder::new(&app, "dslogin", WebviewUrl::External(url))
+        .title("DeepSeek 网页版登录 · 登录后自动生效")
+        .inner_size(1100.0, 800.0)
+        .build()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn read_ds_login_token(app: tauri::AppHandle) -> String {
+    let Some(w) = app.get_webview_window("dslogin") else {
+        return String::new();
+    };
+    let _ = w.eval(
+        "try{document.title='__DSTK__'+(localStorage.getItem('userToken')||'')}catch(e){document.title='__DSTK__'};1",
+    );
+    std::thread::sleep(Duration::from_millis(250));
+    let title = w.title().unwrap_or_default();
+    if let Some(t) = title.strip_prefix("__DSTK__") {
+        let t = t.trim().to_string();
+        if !t.is_empty() {
+            return t;
+        }
+    }
+    String::new()
+}
+
+#[tauri::command]
+fn close_ds_login(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("dslogin") {
+        let _ = w.close();
+    }
+}
+
 fn kill_child(state: &ServerChild) {
     if let Ok(mut guard) = state.0.lock() {
         if let Some(child) = guard.as_mut() {
@@ -94,6 +143,11 @@ fn kill_child(state: &ServerChild) {
 
 fn main() {
     tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            open_ds_login,
+            read_ds_login_token,
+            close_ds_login
+        ])
         .manage(ServerChild(Mutex::new(None)))
         .setup(move |app| {
             let handle = app.handle().clone();

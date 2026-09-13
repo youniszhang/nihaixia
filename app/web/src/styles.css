@@ -1376,6 +1376,12 @@ body {
   font-size: 0.8rem;
 }
 
+.dsweb-actions .dsweb-primary {
+  width: auto;
+  padding: 9px 16px;
+  font-size: 0.82rem;
+}
+
 /* ===== Disclaimer / warning ===== */
 .msg-tag {
   margin-top: 6px;

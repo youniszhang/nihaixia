@@ -13,6 +13,7 @@ export default function AdminSettings({ onClose }) {
   const [err, setErr] = useState('');
   const [dsStatus, setDsStatus] = useState('');   // 网页版登录状态文案
   const [dsBusy, setDsBusy] = useState(false);
+  const isTauri = typeof window !== 'undefined' && !!window.__TAURI__;
 
   useEffect(() => {
     api.getLlmConfig().then((d) => {
@@ -83,6 +84,41 @@ export default function AdminSettings({ onClose }) {
     finally { setDsBusy(false); }
   }
 
+  // 应用内登录：打开内嵌 DeepSeek 登录窗口，登录成功自动注入专用浏览器
+  async function inAppLogin() {
+    const t = window.__TAURI__;
+    if (!t?.core?.invoke) { setErr('应用内登录仅桌面版可用'); return; }
+    setDsBusy(true); setDsStatus(''); setErr('');
+    try {
+      await api.saveLlmConfig({
+        provider: 'dsweb',
+        dsweb_port: Number(cfg.dsweb_port) || 9223,
+        dsweb_expert: !!cfg.dsweb_expert,
+      });
+      await t.core.invoke('open_ds_login');
+      setDsStatus('已在应用内打开登录窗口，请完成登录（支持扫码/账号）。成功后自动生效…');
+      for (let i = 0; i < 120; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        if (!window.__TAURI__) break;
+        const token = await t.core.invoke('read_ds_login_token');
+        if (token) {
+          const r = await api.injectDsToken(token);
+          if (r.loggedIn) {
+            await t.core.invoke('close_ds_login');
+            setDsStatus('✅ 登录成功！专用浏览器已就绪，0 Token 问诊可用。');
+            return;
+          }
+          // token 还没生效（页面刚跳转等），继续轮询
+        }
+      }
+      setDsStatus('等待登录超时（4 分钟）。请重试，或用「打开浏览器登录」在浏览器里登录。');
+    } catch (e2) {
+      setErr('应用内登录失败：' + (e2.message || e2));
+    } finally {
+      setDsBusy(false);
+    }
+  }
+
   return (
     <form className="sheet-form" onSubmit={onSubmit}>
       <div className="field">
@@ -141,10 +177,14 @@ export default function AdminSettings({ onClose }) {
             </label>
           </div>
           <div className="dsweb-actions">
+            {isTauri && (
+              <button type="button" className="btn-primary dsweb-primary" onClick={inAppLogin} disabled={dsBusy}>🔑 应用内登录（推荐）</button>
+            )}
             <button type="button" className="btn-ghost" onClick={openLogin} disabled={dsBusy}>🌐 打开浏览器登录</button>
             <button type="button" className="btn-ghost" onClick={checkLogin} disabled={dsBusy}>🔍 检测登录状态</button>
             <button type="button" className="btn-ghost" onClick={killBrowser} disabled={dsBusy}>✕ 关闭专用浏览器</button>
           </div>
+          {!isTauri && <p className="sheet-msg">提示：当前是网页/服务器模式，「应用内登录」仅在桌面版可用。</p>}
           {dsStatus && <p className="sheet-msg">{dsStatus}</p>}
         </>
       )}

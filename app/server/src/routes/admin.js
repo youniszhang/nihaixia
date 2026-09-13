@@ -1,6 +1,6 @@
 import { getSetting, setSetting, isAdminUser } from '../db.js';
 import { sendError, clamp } from '../lib/validate.js';
-import { openLoginWindow, checkLoginStatus, killBrowser } from '../lib/dsweb.js';
+import { openLoginWindow, checkLoginStatus, killBrowser, injectToken } from '../lib/dsweb.js';
 
 function maskKey(key) {
   if (!key) return '';
@@ -81,5 +81,25 @@ export default async function adminRoutes(fastify) {
     if (!isAdminUser(req.user)) return sendError(reply, 'forbidden', '仅管理员可访问', 403);
     killBrowser();
     return { ok: true };
+  });
+
+  // 应用内登录窗口获取到 userToken 后，写入专用浏览器并验证
+  fastify.post('/dsweb/inject-token', { preHandler: [fastify.authenticate] }, async (req, reply) => {
+    if (!isAdminUser(req.user)) return sendError(reply, 'forbidden', '仅管理员可访问', 403);
+    const token = clamp((req.body?.token || '').trim(), 4000);
+    if (!token) return sendError(reply, 'bad_request', '缺少 token');
+    // 兼容 {"value":"..."} 包装
+    let t = token;
+    if (t.startsWith('{')) {
+      try { t = String(JSON.parse(t).value || ''); } catch {}
+    }
+    if (!t) return sendError(reply, 'bad_token', 'token 为空');
+    const port = Number(getSetting('dsweb_port') || 9223);
+    try {
+      const res = await injectToken(port, t);
+      return { loggedIn: res.loggedIn, hasEditor: res.hasEditor };
+    } catch (err) {
+      return sendError(reply, 'dsweb_inject_failed', (err.message || String(err)).slice(0, 200));
+    }
   });
 }

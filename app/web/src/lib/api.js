@@ -50,6 +50,7 @@ export const api = {
   openDswebLogin: () => request('/api/admin/dsweb/open-login', { method: 'POST' }),
   checkDswebLogin: () => request('/api/admin/dsweb/check-login'),
   killDswebBrowser: () => request('/api/admin/dsweb/kill-browser', { method: 'POST' }),
+  injectDsToken: (token) => request('/api/admin/dsweb/inject-token', { method: 'POST', body: { token } }),
 
   // sessions
   listSessions: () => request('/api/sessions'),
