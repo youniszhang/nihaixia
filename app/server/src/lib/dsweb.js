@@ -161,36 +161,35 @@ const PROBE = `(function(){
   const btns = [...document.querySelectorAll('div[role="button"], button, a')].map(b=>(b.innerText||'').trim()).filter(Boolean);
   const hasLoginBtn = btns.some(t=>/^登录$/.test(t)||/^log ?in$/i.test(t)||/^sign ?in$/i.test(t));
   const hasLogoutBtn = btns.some(t=>/退出|log ?out|sign ?out/i.test(t));
-  // 登录表单的强特征（未登录首页特有）
   const loginMarkers = btns.filter(t=>/立即注册|忘记密码|使用 ?Google ?账号登录|使用 ?Apple ?账号登录|create ?account|forgot ?password/i.test(t));
+  // 关键信号：登录后 userToken 存有真实值（未登录时为 {"value":null}）
+  let token = '';
+  try { token = localStorage.getItem('userToken') || ''; } catch (e) {}
+  let hasUserToken = false;
+  try { const j = JSON.parse(token); hasUserToken = !!(j && j.value); } catch (e) { hasUserToken = token.length > 20; }
   return {
     hasEditor: !!editor,
     hasLoginBtn, hasLogoutBtn,
     loginMarkerCount: loginMarkers.length,
-    url: location.href
+    hasUserToken,
+    onSignInPage: /sign_in|\\/login/i.test(location.href)
   };
 })()`;
 
 function judgeLogin(info) {
-  // 登录表单强特征 or 无输入框但有登录按钮 → 未登录
+  // 登录页 / 登录表单强特征 → 未登录
+  if (info.onSignInPage) return false;
   if (info.loginMarkerCount >= 1) return false;
   if (!info.hasEditor && info.hasLoginBtn) return false;
-  if (info.hasEditor && info.hasLoginBtn) return false;
-  if (info.hasEditor && info.hasLogoutBtn) return true;
-  // 输入框存在但无法确认（页面可能未渲染完）→ 交给调用方二次探测
-  return info.hasEditor ? null : false;
+  // userToken 有真实值 = 已登录（退出按钮藏在头像菜单里，不能作为判据）
+  if (info.hasUserToken) return true;
+  if (info.hasEditor) return false; // 未登录访客态也可能渲染编辑器
+  return false;
 }
 
 export async function checkLogin(client) {
-  let info = await client.evaluate(PROBE);
-  let loggedIn = judgeLogin(info);
-  if (loggedIn === null) {
-    // 模糊状态：等页面渲染完再探一次
-    await new Promise((r) => setTimeout(r, 2500));
-    info = await client.evaluate(PROBE);
-    loggedIn = judgeLogin(info);
-  }
-  return { loggedIn: loggedIn === true, hasEditor: info.hasEditor, info };
+  const info = await client.evaluate(PROBE);
+  return { loggedIn: judgeLogin(info), hasEditor: info.hasEditor, info };
 }
 
 /** 设置开关（专家模式=深度思考 / 智能搜索），容错：找不到按钮不算失败 */

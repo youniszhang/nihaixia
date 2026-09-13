@@ -1,1 +1,1 @@
-{"main-remote":{"identifier":"main-remote","description":"允许本地服务端页面（127.0.0.1:8137）使用 Tauri IPC（应用内 DeepSeek 登录窗口）","remote":{"urls":["http://127.0.0.1:8137"]},"local":true,"windows":["main"],"permissions":["core:default"]}}
+{"main-remote":{"identifier":"main-remote","description":"允许本地服务端页面（127.0.0.1:8137）使用 Tauri IPC（应用内 DeepSeek 登录窗口）","remote":{"urls":["http://127.0.0.1:8137","http://127.0.0.1:8137/*","http://localhost:8137","http://localhost:8137/*"]},"local":true,"windows":["main"],"permissions":["core:default"]}}
