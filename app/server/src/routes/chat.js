@@ -3,7 +3,7 @@ import { sendError, clamp } from '../lib/validate.js';
 import { retrieve } from '../knowledge/loader.js';
 import { SYSTEM_PROMPT, buildRagBlock } from '../knowledge/system-prompt.js';
 import { streamChat } from '../llm.js';
-import { connectDeepSeek, askStream } from '../lib/dsweb.js';
+import { connectDeepSeek, askStream, killBrowser } from '../lib/dsweb.js';
 import config from '../config.js';
 
 function sse(res, data) {
@@ -90,6 +90,7 @@ export default async function chatRoutes(fastify) {
       sse(reply, { type: 'start', user_msg_id: userMsgId });
       if (provider === 'dsweb') {
         // —— 网页版 DeepSeek（0 Token）：把系统指令与问诊上下文并入单条网页消息 ——
+        // 浏览器可能已死（重启电脑/被杀），失败自动重启并重试一次
         const dsPort = Number(getSetting('dsweb_port') || 9223);
         const dsExpert = getSetting('dsweb_expert') !== 'false';
         const compactRag = chunks.length
@@ -102,18 +103,32 @@ export default async function chatRoutes(fastify) {
           compactRag ? '【知识库摘录（回答时参考，禁止照抄）】\n' + compactRag : '',
           '【病人发言】\n' + content,
         ].filter(Boolean).join('\n\n');
-        const client = await connectDeepSeek(dsPort, false);
-        try {
-          for await (const ev of askStream(client, { prompt: webPrompt, expertMode: dsExpert })) {
-            if (ev.type === 'delta') {
-              full += ev.text;
-              sse(reply, { type: 'delta', text: ev.text });
-            } else if (ev.type === 'done') {
-              break;
+
+        const runOnce = async function* () {
+          const client = await connectDeepSeek(dsPort, false);
+          try {
+            for await (const ev of askStream(client, { prompt: webPrompt, expertMode: dsExpert })) {
+              yield ev;
             }
+          } finally {
+            client.close();
           }
-        } finally {
-          client.close();
+        };
+        try {
+          for await (const ev of runOnce()) {
+            if (ev.type === 'delta') { full += ev.text; sse(reply, { type: 'delta', text: ev.text }); }
+            else if (ev.type === 'done') break;
+          }
+        } catch (firstErr) {
+          // 首次失败：杀掉可能僵死的专用浏览器后重试一次；已流出的内容不重复
+          fastify.log.warn({ err: String(firstErr) }, 'dsweb first attempt failed, retrying with fresh browser');
+          sse(reply, { type: 'notice', text: '网页版通道异常，正在自动重启浏览器重试…' });
+          try { killBrowser(); } catch {}
+          await new Promise((r) => setTimeout(r, 1500));
+          for await (const ev of runOnce()) {
+            if (ev.type === 'delta') { full += ev.text; sse(reply, { type: 'delta', text: ev.text }); }
+            else if (ev.type === 'done') break;
+          }
         }
       } else {
         // —— API 模式（OpenAI 兼容）。Admin panel settings (DB) take priority over .env ——

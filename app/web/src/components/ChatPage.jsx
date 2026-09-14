@@ -122,6 +122,9 @@ export default function ChatPage() {
         } else if (ev.type === 'done') {
           setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, id: ev.message_id, content: acc } : x)));
           break;
+        } else if (ev.type === 'notice') {
+          // 中间提示（如自动重启浏览器重试）：临时显示在占位气泡里
+          setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc || `> ℹ️ ${ev.text}` } : x)));
         } else if (ev.type === 'error') {
           setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc + (acc ? '\n\n' : '') + `> ⚠️ ${ev.message}` } : x)));
           break;

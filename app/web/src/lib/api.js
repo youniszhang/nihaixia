@@ -94,3 +94,6 @@ export const api = {
     }
   },
 };
+
+// 展示层用的流式错误（notice 提示 / error 终止）
+export const streamEventNames = ['delta', 'notice', 'error', 'done'];
