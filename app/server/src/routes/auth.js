@@ -1,4 +1,4 @@
-import { createUser, findUserByName, findUserById, getSetting, setSetting, isAdminUser } from '../db.js';
+import { createUser, findUserByName, findUserById, getSetting, setSetting, isAdminUser, touchLogin } from '../db.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import { issueToken, cookieOptions } from '../lib/auth.js';
 import { isValidUsername, isValidPassword, sendError, clamp } from '../lib/validate.js';
@@ -33,8 +33,10 @@ export default async function authRoutes(fastify) {
     }
     const user = findUserByName(username.trim());
     if (!user) return sendError(reply, 'bad_credentials', '用户名或密码不正确', 401);
+    if (user.status === 'disabled') return sendError(reply, 'account_disabled', '账号已被禁用，请联系管理员', 403);
     const ok = await verifyPassword(password, user.password_hash);
     if (!ok) return sendError(reply, 'bad_credentials', '用户名或密码不正确', 401);
+    touchLogin(user.id);
     const token = issueToken(user);
     reply.setCookie('nhx_token', token, cookieOptions);
     return { user: withRole({ id: user.id, username: user.username }) };

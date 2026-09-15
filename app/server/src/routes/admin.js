@@ -28,6 +28,7 @@ export default async function adminRoutes(fastify) {
       api_key_masked: maskKey(key),
       dsweb_port: Number(getSetting('dsweb_port') || 9223),
       dsweb_expert: getSetting('dsweb_expert') !== 'false',
+      system_mode: getSetting('llm_system_mode') || 'auto',
     };
   });
 
@@ -43,6 +44,9 @@ export default async function adminRoutes(fastify) {
     }
     if (b.dsweb_port != null && Number(b.dsweb_port) > 0) setSetting('dsweb_port', String(Number(b.dsweb_port)));
     if (b.dsweb_expert != null) setSetting('dsweb_expert', b.dsweb_expert ? 'true' : 'false');
+    if (b.system_mode != null && ['auto', 'system', 'inline'].includes(b.system_mode)) {
+      setSetting('llm_system_mode', b.system_mode);
+    }
     const key = getSetting('llm_api_key') || '';
     return {
       ok: true,
@@ -53,6 +57,7 @@ export default async function adminRoutes(fastify) {
       api_key_masked: maskKey(key),
       dsweb_port: Number(getSetting('dsweb_port') || 9223),
       dsweb_expert: getSetting('dsweb_expert') !== 'false',
+      system_mode: getSetting('llm_system_mode') || 'auto',
     };
   });
 

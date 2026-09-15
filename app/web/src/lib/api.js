@@ -59,6 +59,24 @@ export const api = {
   systemUpdate: () => request('/api/system/update', { method: 'POST' }),
   systemRestart: () => request('/api/system/restart', { method: 'POST' }),
 
+  // 管理后台：概览 / 用户 / 对话记录 / 报表
+  adminOverview: () => request('/api/admin/overview'),
+  adminListUsers: () => request('/api/admin/users'),
+  adminCreateUser: (username, password) => request('/api/admin/users', { method: 'POST', body: { username, password } }),
+  adminUpdateUser: (id, patch) => request(`/api/admin/users/${id}`, { method: 'PATCH', body: patch }),
+  adminDeleteUser: (id) => request(`/api/admin/users/${id}`, { method: 'DELETE' }),
+  adminConversations: ({ userId, q, limit = 50, offset = 0 } = {}) => {
+    const p = new URLSearchParams();
+    if (userId) p.set('user_id', String(userId));
+    if (q) p.set('q', q);
+    p.set('limit', String(limit));
+    p.set('offset', String(offset));
+    return request(`/api/admin/conversations?${p.toString()}`);
+  },
+  adminConversation: (id) => request(`/api/admin/conversations/${id}`),
+  adminSearch: (q) => request(`/api/admin/search?q=${encodeURIComponent(q)}`),
+  adminReports: (days = 14) => request(`/api/admin/reports?days=${days}`),
+
   // sessions
   listSessions: () => request('/api/sessions'),
   createSession: (title) => request('/api/sessions', { method: 'POST', body: { title } }),

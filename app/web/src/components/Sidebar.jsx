@@ -1,4 +1,4 @@
-export default function Sidebar({ sessions, activeId, onSelect, onNew, onDelete, onProfile, onAdmin, onSystem, user, onLogout, onClose }) {
+export default function Sidebar({ sessions, activeId, onSelect, onNew, onDelete, onProfile, onAdminConsole, user, onLogout, onClose }) {
   return (
     <>
       <div className="sidebar-mask" onClick={onClose} />
@@ -34,8 +34,7 @@ export default function Sidebar({ sessions, activeId, onSelect, onNew, onDelete,
 
         <div className="sidebar-bottom">
           <button className="side-link" onClick={onProfile}>👤 体质档案</button>
-          {user?.is_admin && <button className="side-link" onClick={onAdmin}>⚙️ 模型设置</button>}
-          {user?.is_admin && <button className="side-link" onClick={onSystem}>🔄 系统更新</button>}
+          {user?.is_admin && <button className="side-link" onClick={onAdminConsole}>🛡️ 管理后台</button>}
           <div className="side-user">
             <span className="side-avatar">{user?.username?.slice(0, 1)?.toUpperCase() || 'U'}</span>
             <span className="side-username">{user?.username}</span>

@@ -6,6 +6,7 @@ export default function AdminSettings({ onClose }) {
     provider: 'api',
     base_url: '', model: '', api_key: '',
     dsweb_port: 9223, dsweb_expert: true,
+    system_mode: 'auto',
   });
   const [info, setInfo] = useState({ has_key: false, api_key_masked: '' });
   const [saving, setSaving] = useState(false);
@@ -25,6 +26,7 @@ export default function AdminSettings({ onClose }) {
         model: d.model || '',
         dsweb_port: d.dsweb_port || 9223,
         dsweb_expert: d.dsweb_expert !== false,
+        system_mode: d.system_mode || 'auto',
       }));
     }).catch((e) => setErr(e.message));
   }, []);
@@ -42,6 +44,7 @@ export default function AdminSettings({ onClose }) {
         api_key: cfg.api_key.trim(),
         dsweb_port: Number(cfg.dsweb_port) || 9223,
         dsweb_expert: !!cfg.dsweb_expert,
+        system_mode: cfg.system_mode,
       });
       setInfo({ has_key: d.has_key, api_key_masked: d.api_key_masked });
       setCfg((c) => ({ ...c, base_url: d.base_url || '', model: d.model || '', api_key: '' }));
@@ -156,6 +159,14 @@ export default function AdminSettings({ onClose }) {
               placeholder={info.has_key ? '留空则保持不变' : 'sk-...'}
               autoComplete="new-password"
             />
+          </label>
+          <label className="field">
+            <span>人设下发方式 <small className="key-mask">中转网关若丢弃 system 会变"通用助手"，改 inline 可修复</small></span>
+            <select value={cfg.system_mode} onChange={set('system_mode')}>
+              <option value="auto">自动（推荐：官方 DeepSeek 用 system，中转用 inline）</option>
+              <option value="system">system 角色（标准 OpenAI 协议）</option>
+              <option value="inline">并入用户消息（兼容会丢 system 的中转）</option>
+            </select>
           </label>
         </>
       ) : (

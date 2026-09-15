@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import config from '../config.js';
+import { getUserStatus } from '../db.js';
 
 const TOKEN_TTL_MS = 7 * 24 * 3600 * 1000; // 7 days
 
@@ -35,6 +36,11 @@ export function createAuthenticate() {
     const payload = verifyToken(token);
     if (!payload) {
       return reply.code(401).send({ error: 'unauthorized', message: '请先登录' });
+    }
+    // 已签发的 token 也要校验当前状态：管理员禁用用户后立即生效
+    const status = getUserStatus(payload.uid);
+    if (status === null || status === 'disabled') {
+      return reply.code(401).send({ error: 'account_disabled', message: '账号已被禁用，请联系管理员' });
     }
     req.user = { id: payload.uid, username: payload.un };
   };

@@ -10,6 +10,7 @@ import sessionRoutes from './routes/sessions.js';
 import chatRoutes from './routes/chat.js';
 import profileRoutes from './routes/profile.js';
 import adminRoutes from './routes/admin.js';
+import adminUserRoutes from './routes/admin-users.js';
 import internalRoutes from './routes/internal.js';
 import systemRoutes from './routes/system.js';
 import { loadKnowledge } from './knowledge/loader.js';
@@ -49,6 +50,7 @@ export async function startServer() {
   await app.register(profileRoutes, { prefix: '/api/profile' });
   await app.register(chatRoutes, { prefix: '/api/chat' });
   await app.register(adminRoutes, { prefix: '/api/admin' });
+  await app.register(adminUserRoutes, { prefix: '/api/admin' });
   await app.register(systemRoutes, { prefix: '/api/system' });
   await app.register(internalRoutes, { prefix: '/internal' });
 

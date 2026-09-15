@@ -1,4 +1,4 @@
-import { getSession, addMessage, touchSession, countMessages, renameSession, getProfile, listMessages, updateSessionPin, getSetting } from '../db.js';
+import { getSession, addMessage, touchSession, countMessages, renameSession, getProfile, listRecentMessages, updateSessionPin, getSetting, logUsage } from '../db.js';
 import { sendError, clamp } from '../lib/validate.js';
 import { retrieve } from '../knowledge/loader.js';
 import { SYSTEM_PROMPT, buildRagBlock } from '../knowledge/system-prompt.js';
@@ -64,10 +64,13 @@ export default async function chatRoutes(fastify) {
     req.raw.on('close', () => { clearInterval(heartbeat); abortController.abort(); });
 
     // Build conversation
+    // 注意：必须取「最近」N 条。旧的 listMessages 是 ASC+LIMIT，
+    // 长会话下返回最早的消息，本轮提问反而进不了上下文。
     const history = [];
-    const rows = listMessages(sessionId, 30);
+    const rows = listRecentMessages(sessionId, 30);
     for (const r of rows) {
       if (r.role === 'system') continue;
+      if (r.id === userMsgId) continue; // 本轮提问稍后单独拼，避免重复
       history.push({ role: r.role, content: r.content });
     }
 
@@ -80,10 +83,25 @@ export default async function chatRoutes(fastify) {
       + profileBlock(profile)
       + '\n\n' + buildRagBlock(chunks);
 
-    const messages = [
-      { role: 'system', content: sysContent },
-      ...history,
-    ];
+    // —— system 消息的两种下法 ——
+    // 部分 OpenAI 兼容中转（如 aitrybest）会丢弃 system 角色，模型只看到裸提问，
+    // 表现为「倪师人设失效、被当成编程助手」。此时把人设并入本轮用户消息。
+    // auto：官方 api.deepseek.com 用 system，其它中转一律 inline（实测最稳）。
+    const baseUrlForMode = getSetting('llm_base_url') || config.llm.baseUrl;
+    const modeSetting = getSetting('llm_system_mode') || 'auto';
+    const isOfficialDeepSeek = /^https?:\/\/([^/]*\.)?api\.deepseek\.com(\/|$)/i.test(baseUrlForMode);
+    const useSystemRole = modeSetting === 'system' || (modeSetting === 'auto' && isOfficialDeepSeek);
+
+    const messages = useSystemRole
+      ? [
+          { role: 'system', content: sysContent },
+          ...history,
+          { role: 'user', content },
+        ]
+      : [
+          ...history,
+          { role: 'user', content: sysContent + '\n\n【病人发言】\n' + content },
+        ];
 
     let full = '';
     try {
@@ -145,6 +163,17 @@ export default async function chatRoutes(fastify) {
       if (full.trim()) {
         const asstId = addMessage(sessionId, 'assistant', full);
         touchSession(sessionId);
+        // 用量报表：记录本次成功调用（字符数即用量规模的可靠代理指标）
+        try {
+          logUsage({
+            userId: req.user.id,
+            sessionId,
+            provider,
+            model: provider === 'dsweb' ? 'deepseek-web' : (getSetting('llm_model') || config.llm.model),
+            promptChars: sysContent.length + content.length,
+            completionChars: full.length,
+          });
+        } catch { /* 统计失败不影响对话 */ }
         sse(reply, { type: 'done', message_id: asstId });
       } else {
         sse(reply, { type: 'error', message: '本次未收到有效回复，请重试。' });
@@ -164,6 +193,16 @@ export default async function chatRoutes(fastify) {
       // Keep the partial answer if any
       if (full) {
         const asstId = addMessage(sessionId, 'assistant', full + `\n\n〔生成中断：${msg}〕`);
+        try {
+          logUsage({
+            userId: req.user.id,
+            sessionId,
+            provider,
+            model: provider === 'dsweb' ? 'deepseek-web' : (getSetting('llm_model') || config.llm.model),
+            promptChars: sysContent.length + content.length,
+            completionChars: full.length,
+          });
+        } catch { /* ignore */ }
         sse(reply, { type: 'done', message_id: asstId });
       } else {
         sse(reply, { type: 'error', message: msg });

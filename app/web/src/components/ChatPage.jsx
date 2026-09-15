@@ -5,8 +5,7 @@ import MarkdownMessage from './MarkdownMessage.jsx';
 import ProfileForm from './ProfileForm.jsx';
 import IntakeSheet from './IntakeSheet.jsx';
 import Sidebar from './Sidebar.jsx';
-import AdminSettings from './AdminSettings.jsx';
-import SystemUpdate from './SystemUpdate.jsx';
+import AdminConsole from './AdminConsole.jsx';
 import DisclaimerModal from './DisclaimerModal.jsx';
 
 const DISCLAIMER_SEEN_KEY = 'nhx_disclaimer_accepted_v1';
@@ -21,8 +20,7 @@ export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showIntake, setShowIntake] = useState(false);
-  const [showAdmin, setShowAdmin] = useState(false);
-  const [showSystem, setShowSystem] = useState(false);
+  const [showAdminConsole, setShowAdminConsole] = useState(false);
   const [showDisclaimer, setShowDisclaimer] = useState(
     typeof localStorage !== 'undefined' && !localStorage.getItem(DISCLAIMER_SEEN_KEY)
   );
@@ -164,8 +162,7 @@ export default function ChatPage() {
         onProfile={() => setShowProfile(true)}
         user={user}
         onLogout={logout}
-        onAdmin={() => setShowAdmin(true)}
-        onSystem={() => setShowSystem(true)}
+        onAdminConsole={() => setShowAdminConsole(true)}
         onClose={() => setSidebarOpen(false)}
       />
 
@@ -269,22 +266,8 @@ export default function ChatPage() {
         </div>
       )}
 
-      {showAdmin && (
-        <div className="overlay" onClick={() => setShowAdmin(false)}>
-          <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="sheet-head"><h2>模型设置（管理员）</h2><button className="icon-btn" onClick={() => setShowAdmin(false)}>✕</button></div>
-            <AdminSettings onClose={() => setShowAdmin(false)} />
-          </div>
-        </div>
-      )}
-
-      {showSystem && (
-        <div className="overlay" onClick={() => setShowSystem(false)}>
-          <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="sheet-head"><h2>🔄 系统更新（管理员）</h2><button className="icon-btn" onClick={() => setShowSystem(false)}>✕</button></div>
-            <SystemUpdate onClose={() => setShowSystem(false)} />
-          </div>
-        </div>
+      {showAdminConsole && (
+        <AdminConsole user={user} onClose={() => setShowAdminConsole(false)} />
       )}
 
       {showDisclaimer && (
