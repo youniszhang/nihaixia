@@ -1,4 +1,4 @@
-import { getSession, addMessage, touchSession, countMessages, renameSession, getProfile, listRecentMessages, updateSessionPin, getSetting, logUsage } from '../db.js';
+import { getSession, addMessage, touchSession, countMessages, renameSession, getProfile, listRecentMessages, updateSessionPin, getSetting, logUsage, usageCountToday } from '../db.js';
 import { sendError, clamp } from '../lib/validate.js';
 import { retrieve } from '../knowledge/loader.js';
 import { SYSTEM_PROMPT, buildRagBlock } from '../knowledge/system-prompt.js';
@@ -36,6 +36,12 @@ export default async function chatRoutes(fastify) {
 
     const session = getSession(sessionId);
     if (!session || session.user_id !== req.user.id) return sendError(reply, 'not_found', '问诊会话不存在', 404);
+
+    // 每日问诊上限（每用户，按当日成功生成计数；站点设置 daily_chat_limit，0 = 不限）
+    const dailyLimit = Number(getSetting('daily_chat_limit') || 0);
+    if (dailyLimit > 0 && usageCountToday(req.user.id) >= dailyLimit) {
+      return sendError(reply, 'daily_limit', `今日问诊次数已达上限（每天 ${dailyLimit} 次），请明天再来，或联系管理员在「站点设置」调整。`, 429);
+    }
 
     // Persist an updated intake pin (十问/舌象) if the client sent one
     const activePin = pin || session.pin || '';

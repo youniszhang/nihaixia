@@ -240,6 +240,7 @@ export default async function adminUserRoutes(fastify) {
       registration_explicit: registrationIsExplicit(),
       admin_username: configuredAdminUsername(),
       admin_source: configuredAdminUsername() ? 'env' : 'legacy',
+      daily_chat_limit: Number(getSetting('daily_chat_limit') || 0),
     };
   });
 
@@ -253,12 +254,21 @@ export default async function adminUserRoutes(fastify) {
         target: b.registration_enabled ? '开启注册' : '关闭注册', detail: '',
       });
     }
+    if (b.daily_chat_limit != null) {
+      const n = Math.min(Math.max(Math.floor(Number(b.daily_chat_limit) || 0), 0), 100000);
+      setSetting('daily_chat_limit', String(n));
+      addAudit({
+        actor: req.user, action: 'site.daily_limit',
+        target: `每日问诊上限 ${n}${n ? ' 次' : '（不限）'}`, detail: '',
+      });
+    }
     return {
       ok: true,
       registration_enabled: registrationAllowed(),
       registration_explicit: registrationIsExplicit(),
       admin_username: configuredAdminUsername(),
       admin_source: configuredAdminUsername() ? 'env' : 'legacy',
+      daily_chat_limit: Number(getSetting('daily_chat_limit') || 0),
     };
   });
 

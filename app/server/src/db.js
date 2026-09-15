@@ -344,6 +344,12 @@ export function logUsage({ userId, sessionId = null, provider = 'api', model = '
     VALUES (?,?,?,?,?,?)`).run(userId, sessionId, provider, model, promptChars, completionChars);
 }
 
+// 当日已成功问诊次数（按 usage_log；UTC 日界，与用量报表一致）
+export function usageCountToday(userId) {
+  return db.prepare(`SELECT COUNT(*) AS n FROM usage_log
+    WHERE user_id = ? AND date(created_at) = date('now')`).get(userId)?.n || 0;
+}
+
 export function usageSummary() {
   const total = db.prepare(`SELECT
       COUNT(*) AS calls,

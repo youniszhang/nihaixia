@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api.js';
 
-// 站点设置：注册开关 + 管理员来源说明 + 操作审计
+// 站点设置：注册开关 + 每日问诊上限 + 管理员来源说明 + 操作审计
 export default function AdminSite() {
   const [site, setSite] = useState(null);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
+  const [limitInput, setLimitInput] = useState('');
 
   async function load() {
     try {
-      setSite(await api.adminGetSite());
+      const d = await api.adminGetSite();
+      setSite(d);
+      setLimitInput(String(d.daily_chat_limit ?? 0));
     } catch (e) { setErr(e.message); }
   }
   useEffect(() => { load(); }, []);
@@ -23,6 +26,17 @@ export default function AdminSite() {
     try {
       setSite(await api.adminSaveSite({ registration_enabled: next }));
       flash(next ? '已开启注册' : '已关闭注册');
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  }
+
+  async function saveLimit() {
+    const n = Math.max(Math.floor(Number(limitInput) || 0), 0);
+    setBusy(true); setErr('');
+    try {
+      setSite(await api.adminSaveSite({ daily_chat_limit: n }));
+      setLimitInput(String(n));
+      flash(n > 0 ? `每日问诊上限已设为 ${n} 次` : '每日问诊上限已取消（不限）');
     } catch (e) { setErr(e.message); }
     finally { setBusy(false); }
   }
@@ -53,6 +67,29 @@ export default function AdminSite() {
           >
             <span className="switch-knob" />
           </button>
+        </div>
+      </section>
+
+      <section className="admin-section">
+        <h3>问诊次数</h3>
+        <div className="setting-row">
+          <div>
+            <strong>每日问诊上限（每用户）</strong>
+            <p className="setting-desc">
+              按每个用户当天<b>成功生成回复</b>的次数计数，0 = 不限。达到上限后当天无法继续提问，
+              提示「今日问诊次数已达上限」。适合 API 通道控制用量（如中转 API 按额度计费）。
+            </p>
+          </div>
+          <div className="setting-value site-limit-input">
+            <input
+              type="number" min="0" step="1"
+              value={limitInput}
+              onChange={(e) => setLimitInput(e.target.value)}
+              disabled={busy}
+              aria-label="每日问诊上限次数"
+            />
+            <button type="button" className="btn-primary" onClick={saveLimit} disabled={busy}>保存</button>
+          </div>
         </div>
       </section>
 
@@ -101,6 +138,7 @@ function AuditLog() {
     'user.bulk_enable': '批量启用',
     'user.bulk_delete': '批量删除',
     'site.registration': '注册开关',
+    'site.daily_limit': '每日问诊上限',
   };
 
   return (
