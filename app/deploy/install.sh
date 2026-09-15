@@ -102,13 +102,26 @@ fi
 
 echo ""
 echo "▶ 等待服务就绪…"
+# 注意：不能 curl /health —— Caddy 只代理 /api/*，/health 会落到 SPA 静态文件返回 200（假阳性）。
+# 改为等 api 容器 healthcheck 报 healthy，再请求真实 API 路径确认链路。
+PORT="${HTTP_PORT:-18080}"
+READY=0
 for i in $(seq 1 60); do
-  if curl -fsS "http://127.0.0.1:${HTTP_PORT:-18080}/health" >/dev/null 2>&1; then
-    echo "✅ 服务已就绪"
-    break
+  CID="$($DC ps -q api 2>/dev/null | head -1)"
+  if [ -n "$CID" ] && [ "$(docker inspect --format '{{.State.Health.Status}}' "$CID" 2>/dev/null)" = "healthy" ]; then
+    CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/lan-info" 2>/dev/null || echo 000)"
+    if [ "$CODE" = "200" ] || [ "$CODE" = "401" ]; then
+      echo "✅ 服务已就绪（/api/lan-info → HTTP $CODE）"
+      READY=1
+      break
+    fi
   fi
   sleep 3
 done
+if [ "$READY" != "1" ]; then
+  echo "⚠️ 服务未在预期时间内就绪，最近 api 日志："
+  $DC logs --tail=30 api 2>&1 | tail -30
+fi
 
 echo ""
 echo "========================================"
