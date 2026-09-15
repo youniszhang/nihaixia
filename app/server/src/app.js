@@ -3,7 +3,6 @@ import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
-import os from 'node:os';
 import config from './config.js';
 import { createAuthenticate } from './lib/auth.js';
 import authRoutes from './routes/auth.js';
@@ -54,30 +53,6 @@ export async function startServer() {
   await app.register(internalRoutes, { prefix: '/internal' });
 
   app.get('/health', async () => ({ ok: true, ts: new Date().toISOString(), version: process.env.APP_VERSION || 'dev' }));
-
-  // 手机/PWA 访问地址。
-  // - 服务器部署（STATIC_DIR 未设置 或 设置了 PUBLIC_URL）：返回对外地址
-  // - 桌面版（STATIC_DIR 设置且无 PUBLIC_URL）：返回本机局域网地址
-  app.get('/api/lan-info', { preHandler: [app.authenticate] }, async () => {
-    const publicUrl = (process.env.PUBLIC_URL || '').replace(/\/+$/, '');
-    if (publicUrl) {
-      return { urls: [publicUrl], mode: 'server', host: config.host, port: config.port };
-    }
-    const urls = [];
-    const ifaces = os.networkInterfaces();
-    for (const addrs of Object.values(ifaces)) {
-      for (const a of addrs || []) {
-        if (a.family === 'IPv4' && !a.internal && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a.address)) {
-          urls.push(`http://${a.address}:${config.port}`);
-        }
-      }
-    }
-    // 部署在服务器且未显式配置 PUBLIC_URL 时，用请求 Host 兜底（宝塔反代场景）
-    if (!urls.length) {
-      return { urls: [], mode: 'server', hint: '请设置 PUBLIC_URL 环境变量为你的站点地址，例如 https://tcm.example.com' };
-    }
-    return { urls, mode: 'desktop', host: config.host, port: config.port };
-  });
 
   // 桌面模式：本地服务端直接托管前端静态文件（服务器部署时由 Caddy 托管）
   if (process.env.STATIC_DIR) {

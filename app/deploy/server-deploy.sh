@@ -104,11 +104,11 @@ if [ "$ok" != "1" ]; then
 fi
 log "✅ api 容器 healthy"
 
-code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/lan-info" 2>/dev/null || echo 000)"
+code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/sessions" 2>/dev/null || echo 000)"
 case "$code" in
-  200|401) log "✅ Caddy → api 链路正常（/api/lan-info → HTTP $code）" ;;
+  200|401) log "✅ Caddy → api 链路正常（/api/sessions → HTTP $code）" ;;
   000)     log "❌ 无法连接 http://127.0.0.1:$PORT（web 容器未监听？）"; exit 1 ;;
-  *)       log "⚠️ 反代链路异常（/api/lan-info → HTTP $code），请检查 Caddy/防火墙"; exit 1 ;;
+  *)       log "⚠️ 反代链路异常（/api/sessions → HTTP $code），请检查 Caddy/防火墙"; exit 1 ;;
 esac
 
 log "===== 部署成功 ====="

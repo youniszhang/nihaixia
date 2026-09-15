@@ -84,7 +84,6 @@ UPDATER_URL=http://updater:8765"
 LLM_API_KEY=$LLM_KEY
 APP_SECRET=$APP_SECRET
 DOMAIN=$DOMAIN
-PUBLIC_URL=$PUB_URL
 COOKIE_SECURE=$COOKIE_SECURE
 HTTP_PORT=$HTTP_PORT
 HTTPS_PORT=$HTTPS_PORT
@@ -114,9 +113,9 @@ READY=0
 for i in $(seq 1 60); do
   CID="$($DC ps -q api 2>/dev/null | head -1)"
   if [ -n "$CID" ] && [ "$(docker inspect --format '{{.State.Health.Status}}' "$CID" 2>/dev/null)" = "healthy" ]; then
-    CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/lan-info" 2>/dev/null || echo 000)"
+    CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/sessions" 2>/dev/null || echo 000)"
     if [ "$CODE" = "200" ] || [ "$CODE" = "401" ]; then
-      echo "✅ 服务已就绪（/api/lan-info → HTTP $CODE）"
+      echo "✅ 服务已就绪（/api/sessions → HTTP $CODE）"
       READY=1
       break
     fi
@@ -134,7 +133,7 @@ echo " 部署完成"
 echo "----------------------------------------"
 PORT="${HTTP_PORT:-18080}"
 if [ "$PORT" = "80" ]; then
-  echo " 访问地址: ${PUBLIC_URL:-http://服务器IP}"
+  echo " 访问地址: ${PUB_URL:-http://服务器IP}"
 else
   echo " 本机入口: http://127.0.0.1:$PORT"
   echo " 对外访问: 在宝塔「网站 → 反向代理」指向 http://127.0.0.1:$PORT"
@@ -142,6 +141,5 @@ fi
 echo ""
 echo " 首次使用: 打开站点注册账号（第一个账号自动成为管理员）"
 echo " 模型配置: 登录后侧边栏「⚙️ 模型设置」"
-echo " 手机使用: 侧边栏「📱 手机访问」扫码添加到主屏幕"
 echo " 系统更新: 侧边栏「🔄 系统更新」（已启用 updater 时）"
 echo "========================================"

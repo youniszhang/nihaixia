@@ -1395,61 +1395,6 @@ body {
   }
 }
 
-/* ===== 手机访问面板 ===== */
-.lan-wrap {
-  padding: 20px;
-}
-
-.lan-steps {
-  padding-left: 20px;
-  font-size: 0.88rem;
-  color: var(--text-dim);
-  line-height: 1.8;
-  margin-bottom: 16px;
-}
-
-.lan-body {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
-}
-
-.lan-qr {
-  padding: 10px;
-  background: white;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
-.lan-qr-placeholder {
-  width: 220px;
-  height: 220px;
-  background: var(--bg);
-}
-
-.lan-urls {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.lan-url {
-  font-family: var(--mono);
-  font-size: 0.85rem;
-  background: var(--bg);
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  color: var(--text);
-}
-
-.lan-url:hover {
-  background: var(--border-light);
-}
-
 /* ===== 系统更新面板 ===== */
 .sys-grid {
   display: grid;
