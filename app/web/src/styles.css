@@ -2219,3 +2219,219 @@ body {
     white-space: nowrap;
   }
 }
+
+/* ===== 管理后台：批量操作 / 开关 / 站点设置 ===== */
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  font-size: 0.84rem;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  box-shadow: var(--shadow);
+}
+
+.bulk-bar .btn-ghost {
+  width: auto;
+  padding: 7px 14px;
+  font-size: 0.8rem;
+}
+
+.bulk-bar .btn-ghost.danger {
+  color: #a33;
+  border-color: rgba(170, 51, 51, 0.4);
+}
+
+.bulk-bar .btn-ghost.danger:hover {
+  background: rgba(170, 51, 51, 0.08);
+}
+
+.th-check {
+  width: 36px;
+  text-align: center;
+}
+
+.th-check input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: var(--red);
+}
+
+.badge-self {
+  background: rgba(184, 134, 11, 0.14);
+  color: var(--amber);
+}
+
+.td-note {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-select {
+  min-width: 120px;
+  padding: 9px 10px;
+}
+
+.admin-modal .confirm-body {
+  font-size: 0.85rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.modal-danger-title {
+  color: #a33;
+}
+
+.btn-danger {
+  padding: 10px 20px;
+  background: #a33;
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+
+.btn-danger:hover {
+  background: #8c2a2a;
+}
+
+.btn-danger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 站点设置 */
+.setting-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+}
+
+.setting-row strong {
+  font-size: 0.9rem;
+}
+
+.setting-desc {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  line-height: 1.65;
+  margin-top: 5px;
+  max-width: 620px;
+}
+
+.setting-desc code {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.74rem;
+  font-family: var(--mono);
+}
+
+.setting-warn {
+  color: var(--amber);
+}
+
+.setting-value {
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.setting-value code {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 12px;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+}
+
+/* 开关 */
+.switch {
+  flex-shrink: 0;
+  width: 52px;
+  height: 30px;
+  border-radius: var(--radius-full);
+  border: none;
+  background: #ccc;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.2s;
+  padding: 0;
+}
+
+.switch.on {
+  background: var(--jade);
+}
+
+.switch:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s;
+}
+
+.switch.on .switch-knob {
+  transform: translateX(22px);
+}
+
+/* 登录页提示条 */
+.auth-notice {
+  background: rgba(45, 138, 78, 0.08);
+  border: 1px solid rgba(45, 138, 78, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: var(--jade);
+  margin-bottom: 14px;
+}
+
+.auth-notice code {
+  background: rgba(45, 138, 78, 0.12);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: var(--mono);
+}
+
+@media (max-width: 768px) {
+  .setting-row {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .bulk-bar {
+    position: static;
+  }
+}

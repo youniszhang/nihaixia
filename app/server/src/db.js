@@ -82,6 +82,24 @@ if (!userCols.includes('last_login_at')) {
 if (!userCols.includes('note')) {
   db.exec("ALTER TABLE users ADD COLUMN note TEXT DEFAULT ''");
 }
+if (!userCols.includes('token_version')) {
+  // 改密/禁用时递增，旧签发 token 立即失效（token 无状态，需版本号兜底）
+  db.exec('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0');
+}
+
+db.exec(`
+-- 管理员操作审计（谁在什么时候改了谁）
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  actor_id INTEGER,
+  actor_username TEXT DEFAULT '',
+  action TEXT NOT NULL,
+  target TEXT DEFAULT '',
+  detail TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_log(created_at DESC);
+`);
 
 // ---------- settings ----------
 export function getSetting(key) {
@@ -96,12 +114,81 @@ export function deleteSetting(key) {
   db.prepare('DELETE FROM settings WHERE key = ?').run(key);
 }
 
-// First registered user becomes admin (or set ADMIN_USERNAME env to override).
+// ---------- 管理员判定 ----------
+// 优先级：ADMIN_USERNAME（.env，唯一权威来源）> admin_user_id（老部署兼容）
+// 设计变更（2026-09）：管理员写在配置文件里，不再由「第一个注册的用户」自动担任。
+export function configuredAdminUsername() {
+  return (process.env.ADMIN_USERNAME || '').trim();
+}
+
+// 配置的管理员账号是否已在库中存在
+export function configuredAdminExists() {
+  const name = configuredAdminUsername();
+  if (!name) return false;
+  return Boolean(findUserByNameVar(name));
+}
+
 export function isAdminUser(user) {
   if (!user) return false;
-  if (process.env.ADMIN_USERNAME && user.username === process.env.ADMIN_USERNAME) return true;
+  const adminName = configuredAdminUsername();
+  if (adminName) {
+    if (String(user.username).toLowerCase() === adminName.toLowerCase()) return true;
+    // 安全阀：配置的管理员账号还不存在（未注册/名字写错）时，保留老规则的管理员，
+    // 避免整个站点失去管理员入口；该账号一旦注册，老规则自动失效。
+    if (!configuredAdminExists()) {
+      const adminId = getSetting('admin_user_id');
+      return adminId != null && String(user.id) === String(adminId);
+    }
+    return false;
+  }
+  // 未配置 ADMIN_USERNAME：兼容老部署（历史上第一个注册用户 = 管理员）
   const adminId = getSetting('admin_user_id');
   return adminId != null && String(user.id) === String(adminId);
+}
+
+// 与 isAdminUser 同源的「目标用户是否管理员」判定（供后台校验用，避免逻辑漂移）
+export function isAdminIdentity(user) {
+  return isAdminUser(user);
+}
+
+// 是否存在可用的管理员账号（用于空库引导与注册开关例外）
+export function hasConfiguredAdminAccount() {
+  const adminName = configuredAdminUsername();
+  if (adminName) return configuredAdminExists();
+  const adminId = getSetting('admin_user_id');
+  if (adminId == null) return false;
+  const u = db.prepare('SELECT id FROM users WHERE id = ?').get(adminId);
+  return Boolean(u);
+}
+function findUserByNameVar(name) {
+  return db.prepare('SELECT * FROM users WHERE lower(username) = lower(?)').get(name);
+}
+
+// ---------- 注册开关 ----------
+// 优先级：数据库设置（后台在线切换）> REGISTRATION_ENABLED 环境变量 > 默认开放
+// 默认开放是为兼容既有部署；管理员可在后台「站点设置」关闭。
+export function isRegistrationOpen() {
+  const stored = getSetting('registration_enabled');
+  if (stored !== null) return stored !== 'false';
+  const env = (process.env.REGISTRATION_ENABLED || '').trim().toLowerCase();
+  if (env === 'false' || env === '0' || env === 'off') return false;
+  if (env === 'true' || env === '1' || env === 'on') return true;
+  return true;
+}
+// 是否已显式设置过（区分默认值）
+export function registrationIsExplicit() {
+  if (getSetting('registration_enabled') !== null) return true;
+  const env = (process.env.REGISTRATION_ENABLED || '').trim();
+  return env !== '';
+}
+// 空库首次启动时允许创建管理员账号（否则没人能进后台）
+export function registrationRequiresBootstrap() {
+  const { c } = db.prepare('SELECT COUNT(*) c FROM users').get();
+  return c === 0;
+}
+export function registrationAllowed() {
+  if (registrationRequiresBootstrap()) return true;
+  return isRegistrationOpen();
 }
 
 // ---------- users ----------
@@ -128,12 +215,18 @@ export function listUsersWithStats() {
 }
 export function setUserStatus(id, status) {
   db.prepare('UPDATE users SET status = ? WHERE id = ?').run(status, id);
+  // 禁用时让已签发的 token 立即失效
+  if (status === 'disabled') bumpTokenVersion(id);
 }
 export function setUserNote(id, note) {
   db.prepare('UPDATE users SET note = ? WHERE id = ?').run(note, id);
 }
 export function setUserPassword(id, passwordHash) {
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, id);
+  bumpTokenVersion(id); // 改密后旧会话全部失效
+}
+export function renameUser(id, username) {
+  db.prepare('UPDATE users SET username = ? WHERE id = ?').run(username, id);
 }
 export function deleteUser(id) {
   db.prepare('DELETE FROM users WHERE id = ?').run(id);
@@ -144,6 +237,38 @@ export function touchLogin(id) {
 export function getUserStatus(id) {
   const row = db.prepare('SELECT status FROM users WHERE id = ?').get(id);
   return row ? row.status : null;
+}
+export function getUserTokenVersion(id) {
+  const row = db.prepare('SELECT token_version FROM users WHERE id = ?').get(id);
+  return row ? Number(row.token_version || 0) : null;
+}
+export function bumpTokenVersion(id) {
+  db.prepare('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?').run(id);
+}
+// 批量操作：ids 为数字数组，返回实际影响条数
+export function bulkSetUserStatus(ids, status) {
+  const stmt = db.prepare('UPDATE users SET status = ? WHERE id = ?');
+  let n = 0;
+  for (const id of ids) { stmt.run(status, id); if (status === 'disabled') bumpTokenVersion(id); n++; }
+  return n;
+}
+export function bulkDeleteUsers(ids) {
+  const stmt = db.prepare('DELETE FROM users WHERE id = ?');
+  let n = 0;
+  for (const id of ids) { stmt.run(id); n++; }
+  return n;
+}
+
+// ---------- admin: audit ----------
+export function addAudit({ actor, action, target = '', detail = '' }) {
+  db.prepare(`INSERT INTO audit_log (actor_id, actor_username, action, target, detail)
+    VALUES (?,?,?,?,?)`).run(
+    actor?.id ?? null, actor?.username ?? '', String(action), String(target).slice(0, 200), String(detail).slice(0, 500),
+  );
+}
+export function listAudit(limit = 100) {
+  return db.prepare(`SELECT id, actor_username, action, target, detail, created_at
+    FROM audit_log ORDER BY id DESC LIMIT ?`).all(Math.min(Number(limit) || 100, 500));
 }
 
 // ---------- admin: conversations ----------

@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { api } from '../lib/api.js';
 import { useAuth } from '../lib/store.jsx';
 
 export default function AuthPage() {
@@ -9,6 +10,27 @@ export default function AuthPage() {
   const [confirm, setConfirm] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  // 注册开关：服务端公开配置决定（bootstrap = 空库首次部署，必须允许建管理员）
+  const [regOpen, setRegOpen] = useState(true);
+  const [bootstrap, setBootstrap] = useState(false);
+
+  useEffect(() => {
+    api.authConfig()
+      .then((c) => {
+        setRegOpen(Boolean(c.registration_enabled));
+        setBootstrap(Boolean(c.bootstrap));
+        if (c.bootstrap) setMode('register');
+      })
+      .catch(() => { /* 配置读取失败时保持默认（显示注册入口） */ });
+  }, []);
+
+  // 开关关闭后，若用户正停留在注册页则自动切回登录
+  useEffect(() => {
+    if (!regOpen && mode === 'register') {
+      setMode('login');
+      setErr('');
+    }
+  }, [regOpen, mode]);
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -43,8 +65,17 @@ export default function AuthPage() {
         <form className="auth-card" onSubmit={onSubmit}>
           <div className="auth-tabs" role="tablist">
             <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'active' : ''} onClick={() => { setMode('login'); setErr(''); }}>登录</button>
-            <button type="button" role="tab" aria-selected={mode === 'register'} className={mode === 'register' ? 'active' : ''} onClick={() => { setMode('register'); setErr(''); }}>注册</button>
+            {regOpen && (
+              <button type="button" role="tab" aria-selected={mode === 'register'} className={mode === 'register' ? 'active' : ''} onClick={() => { setMode('register'); setErr(''); }}>注册</button>
+            )}
           </div>
+
+          {bootstrap && mode === 'register' && (
+            <p className="auth-notice">
+              首次部署：请创建管理员账号。管理员身份也可在服务器 <code>.env</code> 中用
+              <code> ADMIN_USERNAME </code>指定。
+            </p>
+          )}
 
           <label className="field">
             <span>用户名</span>
@@ -68,7 +99,10 @@ export default function AuthPage() {
           </button>
 
           <p className="auth-foot">
-            问诊记录会自动保存在你的账户下。<br />登录即代表你理解：本应用内容为中医学习研究之用，不构成医疗诊断。
+            {regOpen
+              ? <>问诊记录会自动保存在你的账户下。<br /></>
+              : <>本站已关闭注册，账号请联系管理员开通。<br /></>}
+            登录即代表你理解：本应用内容为中医学习研究之用，不构成医疗诊断。
           </p>
         </form>
       </div>

@@ -42,6 +42,9 @@ else
   read -rp "2) 站点访问地址（如 https://tcm.example.com，直接 IP 访问则填 http://你的IP）: " PUB_URL
   read -rp "3) 反向代理模式？(宝塔反代填 y，本机直接对外 80/443 填 n) [y/n]: " BEHIND_PROXY
   read -rp "4) 启用一键更新功能？[y/n]: " ENABLE_UPDATER
+  read -rp "5) 管理员用户名（留空 = 第一个注册的用户自动成为管理员）: " ADMIN_NAME
+  read -rp "6) 允许新用户自行注册？(y = 开放 / n = 关闭，仅管理员建号) [y]: " ALLOW_REG
+  if [ "$ALLOW_REG" = "n" ]; then REGISTRATION_ENABLED=false; else REGISTRATION_ENABLED=true; fi
 
   APP_SECRET="$(openssl rand -hex 32)"
   HTTP_PORT=18080
@@ -83,6 +86,8 @@ UPDATER_URL=http://updater:8765"
 # 由 install.sh 生成于 $(date '+%Y-%m-%d %H:%M:%S')
 LLM_API_KEY=$LLM_KEY
 APP_SECRET=$APP_SECRET
+ADMIN_USERNAME=$ADMIN_NAME
+REGISTRATION_ENABLED=$REGISTRATION_ENABLED
 DOMAIN=$DOMAIN
 COOKIE_SECURE=$COOKIE_SECURE
 HTTP_PORT=$HTTP_PORT

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import config from '../config.js';
-import { getUserStatus } from '../db.js';
+import { getUserStatus, getUserTokenVersion } from '../db.js';
 
 const TOKEN_TTL_MS = 7 * 24 * 3600 * 1000; // 7 days
 
@@ -12,7 +12,10 @@ export function sign(payloadB64) {
 }
 
 export function issueToken(user) {
+  // tv = token_version：改密/禁用后服务端递增，旧 token 立即失效
+  const tv = getUserTokenVersion(user.id);
   const payload = { uid: user.id, un: user.username, exp: Date.now() + TOKEN_TTL_MS };
+  if (tv != null) payload.tv = tv;
   const p = b64url(JSON.stringify(payload));
   return `${p}.${sign(p)}`;
 }
@@ -41,6 +44,11 @@ export function createAuthenticate() {
     const status = getUserStatus(payload.uid);
     if (status === null || status === 'disabled') {
       return reply.code(401).send({ error: 'account_disabled', message: '账号已被禁用，请联系管理员' });
+    }
+    // token 版本校验：改密后旧 token 全部失效
+    const tv = getUserTokenVersion(payload.uid);
+    if (tv != null && Number(payload.tv || 0) !== tv) {
+      return reply.code(401).send({ error: 'token_revoked', message: '登录状态已失效，请重新登录' });
     }
     req.user = { id: payload.uid, username: payload.un };
   };

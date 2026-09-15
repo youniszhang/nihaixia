@@ -8,6 +8,10 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
       LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
       APP_SECRET: ${APP_SECRET:?set APP_SECRET in .env}
+      # 管理员账号（用户名）。留空则沿用老规则（第一个注册的用户）
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      # 注册开关初始值（后台可在线切换，切换后以数据库为准）
+      REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-}
       DB_PATH: /app/data/nihaixia.db
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       LOG_LEVEL: ${LOG_LEVEL:-info}

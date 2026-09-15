@@ -5,6 +5,7 @@ import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import config from './config.js';
 import { createAuthenticate } from './lib/auth.js';
+import { configuredAdminUsername, configuredAdminExists } from './db.js';
 import authRoutes from './routes/auth.js';
 import sessionRoutes from './routes/sessions.js';
 import chatRoutes from './routes/chat.js';
@@ -70,6 +71,15 @@ export async function startServer() {
 
   if (!config.llm.apiKey && process.env.ALLOW_NO_LLM !== 'true') {
     app.log.warn('LLM_API_KEY 未配置 — 启动完成但对话接口将返回错误（可在管理面板配置）');
+  }
+
+  // 管理员配置自检：配错 ADMIN_USERNAME 会导致无人能进后台（安全阀见 db.isAdminUser）
+  const adminName = configuredAdminUsername();
+  if (adminName && !configuredAdminExists()) {
+    app.log.warn(
+      `ADMIN_USERNAME="${adminName}" 指定的账号尚未注册 —— 该用户名注册后才会成为管理员；` +
+      '在此之前沿用老规则（第一个注册的用户）。请确认用户名拼写无误。',
+    );
   }
 
   try {

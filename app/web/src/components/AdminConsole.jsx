@@ -4,17 +4,19 @@ import AdminDashboard from './admin/AdminDashboard.jsx';
 import AdminUsers from './admin/AdminUsers.jsx';
 import AdminConversations from './admin/AdminConversations.jsx';
 import AdminReports from './admin/AdminReports.jsx';
+import AdminSite from './admin/AdminSite.jsx';
 import AdminSettings from './AdminSettings.jsx';
 import SystemUpdate from './SystemUpdate.jsx';
 
 // 管理员独立后台：与用户问诊界面完全分离的全屏控制台。
-// 入口在侧边栏（仅管理员可见）。标签页：概览 / 用户 / 对话记录 / 报表 / 模型 / 系统。
+// 入口在侧边栏（仅管理员可见）。标签页：概览 / 用户 / 对话记录 / 报表 / 模型 / 站点 / 系统。
 const TABS = [
   { key: 'dashboard', label: '📊 概览' },
   { key: 'users', label: '👥 用户管理' },
   { key: 'conversations', label: '💬 对话记录' },
   { key: 'reports', label: '📈 使用报表' },
   { key: 'model', label: '⚙️ 模型设置' },
+  { key: 'site', label: '🔧 站点设置' },
   { key: 'system', label: '🔄 系统更新' },
 ];
 
@@ -71,6 +73,7 @@ export default function AdminConsole({ onClose, user }) {
           {tab === 'conversations' && <AdminConversations filter={convFilter} onClearFilter={() => setConvFilter(null)} />}
           {tab === 'reports' && <AdminReports />}
           {tab === 'model' && <AdminSettings onClose={onClose} />}
+          {tab === 'site' && <AdminSite />}
           {tab === 'system' && <SystemUpdate onClose={onClose} />}
         </div>
       </main>

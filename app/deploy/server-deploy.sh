@@ -50,8 +50,30 @@ cd "$APP_DIR" || exit 1
 log "✅ 代码: $(git rev-parse --short HEAD) $(git log -1 --pretty=%s)"
 
 # ---- 3. 写 .env ----
+# 注意：NIHAIXIA_ENV_B64 会整体覆盖 .env。为防止把管理员等人工配置冲掉，
+# 覆盖前先备份，并把旧文件里的手工配置项（ADMIN_USERNAME / REGISTRATION_ENABLED）
+# 补回新文件（仅在旧值非空且新文件未显式设置时）。
+env_preserve() {
+  local key="$1"
+  if [ ! -f "$APP_DIR/.env" ]; then return 0; fi
+  local cur
+  cur="$(grep -E "^${key}=" "$APP_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+  [ -z "$cur" ] && return 0
+  if grep -qE "^${key}=.+" "$APP_DIR/.env.tmp" 2>/dev/null; then return 0; fi
+  printf '\n# 由部署脚本保留（原 .env 中的手工配置）\n%s=%s\n' "$key" "$cur" >> "$APP_DIR/.env.tmp"
+  log "↩  已保留原配置 $key=$cur"
+}
+
 if [ -n "${NIHAIXIA_ENV_B64:-}" ]; then
-  printf '%s' "$NIHAIXIA_ENV_B64" | base64 -d > .env
+  if [ -f .env ]; then
+    cp .env ".env.bak.$(date +%Y%m%d%H%M%S)"
+    log "🗄  已备份原 .env"
+  fi
+  printf '%s' "$NIHAIXIA_ENV_B64" | base64 -d > .env.tmp
+  for k in ADMIN_USERNAME REGISTRATION_ENABLED LLM_API_KEY LLM_BASE_URL LLM_MODEL; do
+    env_preserve "$k"
+  done
+  mv .env.tmp .env
   chmod 600 .env
   log "✅ 已从 NIHAIXIA_ENV_B64 写入 .env"
 fi

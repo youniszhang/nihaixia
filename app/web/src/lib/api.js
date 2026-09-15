@@ -36,6 +36,7 @@ async function request(path, { method = 'GET', body, signal } = {}) {
 export const api = {
   // auth
   me: () => request('/api/auth/me'),
+  authConfig: () => request('/api/auth/config'),
   login: (username, password) => request('/api/auth/login', { method: 'POST', body: { username, password } }),
   register: (username, password) => request('/api/auth/register', { method: 'POST', body: { username, password } }),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
@@ -62,7 +63,7 @@ export const api = {
   // 管理后台：概览 / 用户 / 对话记录 / 报表
   adminOverview: () => request('/api/admin/overview'),
   adminListUsers: () => request('/api/admin/users'),
-  adminCreateUser: (username, password) => request('/api/admin/users', { method: 'POST', body: { username, password } }),
+  adminCreateUser: (username, password, note) => request('/api/admin/users', { method: 'POST', body: { username, password, note } }),
   adminUpdateUser: (id, patch) => request(`/api/admin/users/${id}`, { method: 'PATCH', body: patch }),
   adminDeleteUser: (id) => request(`/api/admin/users/${id}`, { method: 'DELETE' }),
   adminConversations: ({ userId, q, limit = 50, offset = 0 } = {}) => {
@@ -76,6 +77,10 @@ export const api = {
   adminConversation: (id) => request(`/api/admin/conversations/${id}`),
   adminSearch: (q) => request(`/api/admin/search?q=${encodeURIComponent(q)}`),
   adminReports: (days = 14) => request(`/api/admin/reports?days=${days}`),
+  adminBulkUsers: (ids, action) => request('/api/admin/users/bulk', { method: 'POST', body: { ids, action } }),
+  adminGetSite: () => request('/api/admin/site'),
+  adminSaveSite: (patch) => request('/api/admin/site', { method: 'PUT', body: patch }),
+  adminAudit: (limit = 100) => request(`/api/admin/audit?limit=${limit}`),
 
   // sessions
   listSessions: () => request('/api/sessions'),
