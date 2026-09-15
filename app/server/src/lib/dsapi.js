@@ -146,7 +146,18 @@ export async function* askDirect(token, { prompt, expertMode = true, timeoutMs =
   }
 
   if (!finished && sentLen === 0) {
-    throw new Error('直连通道未收到任何回复内容（凭证可能已失效，或网页版接口有变更）');
+    // 带上服务端实际收到的响应头片段，否则「空流」无法定位（IP 风控 / 错误码 / 接口变更难以区分）
+    let detail = '';
+    const cm = raw.match(/"code":(\d+)/);
+    if (cm && cm[1] !== '0') {
+      const mm = raw.match(/"msg":"([^"]{0,80})"/);
+      detail = `：网页版接口错误 ${cm[1]}${mm ? ` ${mm[1]}` : ''}`;
+    } else if (raw.trim()) {
+      detail = `（响应片段：${raw.replace(/\s+/g, ' ').trim().slice(0, 120)}）`;
+    } else {
+      detail = '（响应为空流，服务器 IP 可能被网页版风控拦截）';
+    }
+    throw new Error(`直连通道未收到任何回复内容${detail}`);
   }
   yield { type: 'done' };
 }
