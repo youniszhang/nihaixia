@@ -9,9 +9,14 @@ services:
       LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
       APP_SECRET: ${APP_SECRET:?set APP_SECRET in .env}
       DB_PATH: /app/data/nihaixia.db
-      # true = HTTPS 部署（正式域名）；本地 HTTP 体验设为 false，否则浏览器不保存登录 Cookie
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # 站点对外地址（手机/PWA 面板展示用），如 https://tcm.example.com
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      APP_VERSION: ${APP_VERSION:-1.0.0}
+      # 一键更新（可选）：指向 updater 容器
+      UPDATER_URL: ${UPDATER_URL:-}
+      UPDATER_TOKEN: ${UPDATER_TOKEN:-}
     volumes:
       - data:/app/data
     restart: unless-stopped
@@ -37,6 +42,28 @@ services:
     volumes:
       - caddy_data:/data
       - caddy_config:/config
+
+  # 一键更新容器（可选，启用需在 .env 配置 UPDATER_TOKEN）
+  # 不映射公网端口，仅 docker 内网可达；挂载 docker.sock 执行镜像重建。
+  updater:
+    profiles: ["updater"]
+    build:
+      context: ./server
+      dockerfile: updater/Dockerfile
+    container_name: nihaixia-updater
+    environment:
+      UPDATER_TOKEN: ${UPDATER_TOKEN:?set UPDATER_TOKEN to enable one-click update}
+      PROJECT_DIR: /workspace
+      GIT_BRANCH: ${GIT_BRANCH:-main}
+      COMPOSE_FILE: docker-compose.yml
+      SERVICE_NAME: "web api"
+    volumes:
+      - .:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    working_dir: /workspace
+    restart: unless-stopped
+    expose:
+      - "8765"
 
 volumes:
   data:

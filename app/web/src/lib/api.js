@@ -55,6 +55,11 @@ export const api = {
   inAppLoginStatus: () => request('/api/admin/dsweb/in-app-login-status'),
   lanInfo: () => request('/api/lan-info'),
 
+  // 系统更新（服务器一键部署）
+  systemStatus: () => request('/api/system/status'),
+  systemUpdate: () => request('/api/system/update', { method: 'POST' }),
+  systemRestart: () => request('/api/system/restart', { method: 'POST' }),
+
   // sessions
   listSessions: () => request('/api/sessions'),
   createSession: (title) => request('/api/sessions', { method: 'POST', body: { title } }),

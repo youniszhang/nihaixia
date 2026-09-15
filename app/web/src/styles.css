@@ -1450,6 +1450,56 @@ body {
   background: var(--border-light);
 }
 
+/* ===== 系统更新面板 ===== */
+.sys-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.sys-grid > div {
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sys-grid span {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.sys-grid code {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.sys-grid strong {
+  font-size: 0.82rem;
+}
+
+.sys-running {
+  color: var(--amber) !important;
+}
+
+.sys-log {
+  background: #1a1a2e;
+  color: #c8c8d8;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.6;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  max-height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  margin-bottom: 12px;
+}
+
 /* ===== Disclaimer / warning ===== */
 .msg-tag {
   margin-top: 6px;

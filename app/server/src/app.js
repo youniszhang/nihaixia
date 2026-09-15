@@ -12,6 +12,7 @@ import chatRoutes from './routes/chat.js';
 import profileRoutes from './routes/profile.js';
 import adminRoutes from './routes/admin.js';
 import internalRoutes from './routes/internal.js';
+import systemRoutes from './routes/system.js';
 import { loadKnowledge } from './knowledge/loader.js';
 
 export async function startServer() {
@@ -49,12 +50,19 @@ export async function startServer() {
   await app.register(profileRoutes, { prefix: '/api/profile' });
   await app.register(chatRoutes, { prefix: '/api/chat' });
   await app.register(adminRoutes, { prefix: '/api/admin' });
+  await app.register(systemRoutes, { prefix: '/api/system' });
   await app.register(internalRoutes, { prefix: '/internal' });
 
-  app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
+  app.get('/health', async () => ({ ok: true, ts: new Date().toISOString(), version: process.env.APP_VERSION || 'dev' }));
 
-  // 手机/PWA 访问：返回本机局域网地址（同一 Wi-Fi 下的 iPhone/iPad 用）
+  // 手机/PWA 访问地址。
+  // - 服务器部署（STATIC_DIR 未设置 或 设置了 PUBLIC_URL）：返回对外地址
+  // - 桌面版（STATIC_DIR 设置且无 PUBLIC_URL）：返回本机局域网地址
   app.get('/api/lan-info', { preHandler: [app.authenticate] }, async () => {
+    const publicUrl = (process.env.PUBLIC_URL || '').replace(/\/+$/, '');
+    if (publicUrl) {
+      return { urls: [publicUrl], mode: 'server', host: config.host, port: config.port };
+    }
     const urls = [];
     const ifaces = os.networkInterfaces();
     for (const addrs of Object.values(ifaces)) {
@@ -64,7 +72,11 @@ export async function startServer() {
         }
       }
     }
-    return { urls, host: config.host, port: config.port };
+    // 部署在服务器且未显式配置 PUBLIC_URL 时，用请求 Host 兜底（宝塔反代场景）
+    if (!urls.length) {
+      return { urls: [], mode: 'server', hint: '请设置 PUBLIC_URL 环境变量为你的站点地址，例如 https://tcm.example.com' };
+    }
+    return { urls, mode: 'desktop', host: config.host, port: config.port };
   });
 
   // 桌面模式：本地服务端直接托管前端静态文件（服务器部署时由 Caddy 托管）

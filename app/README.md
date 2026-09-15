@@ -167,3 +167,60 @@ app/
 ## 免责声明
 
 本应用内容仅供中医学习与学术研究，不构成医疗诊断、处方或个体化治疗建议。身体不适请咨询执业中医师；急性危重症请立即就医。
+
+### 宝塔面板部署（推荐）
+
+**方式一：一键脚本（推荐）**
+
+```bash
+# 服务器上执行（宝塔终端 / SSH）
+cd /root
+git clone https://github.com/youniszhang/nihaixia.git
+cd nihaixia/app
+bash deploy/install.sh
+```
+
+脚本会检查 Docker、交互式生成 `.env`、构建并启动服务。
+
+**方式二：手动**
+
+```bash
+cd /root/nihaixia/app
+cp .env.example .env
+nano .env          # 填 LLM_API_KEY、APP_SECRET（openssl rand -hex 32）、PUBLIC_URL
+docker compose up -d --build
+```
+
+**接入宝塔反向代理**
+
+1. 宝塔「网站 → 添加站点」，绑定你的域名
+2. 该站点「反向代理 → 添加反向代理」，目标 URL 填 `http://127.0.0.1:18080`
+3. 申请 SSL 证书并开启「强制 HTTPS」
+
+关键 `.env` 配置说明：
+
+| 变量 | 说明 |
+|------|------|
+| `HTTP_PORT` | 本机监听端口（宝塔反代模式建议 `18080`，避免占用 80） |
+| `PUBLIC_URL` | 对外访问地址，用于「手机访问」二维码，如 `https://tcm.example.com` |
+| `COOKIE_SECURE` | HTTPS 站点填 `true`；纯 HTTP 访问填 `false`（否则无法登录） |
+| `UPDATER_TOKEN` | 启用「系统更新」一键部署需配置（`openssl rand -hex 32`） |
+
+**一键更新**
+
+配置 `UPDATER_TOKEN` 后，服务端会启动 updater 容器（不映射公网端口，仅 Docker 内网可达）。
+管理员登录后侧边栏出现「🔄 系统更新」：显示本地/远端版本、一键拉取 GitHub 最新代码并重建服务。
+
+```bash
+# 首次启用 updater（服务器执行）
+cd /root/nihaixia/app
+echo "UPDATER_TOKEN=$(openssl rand -hex 32)" >> .env
+echo "UPDATER_URL=http://nihaixia-updater:8765" >> .env
+docker compose --profile updater up -d --build
+```
+
+**数据持久化**：SQLite 数据库在 Docker 卷 `app_data`，容器重建不丢数据。备份：
+
+```bash
+docker run --rm -v app_data:/data -v $(pwd):/backup alpine tar czf /backup/nihaixia-backup.tar.gz -C /data .
+```
