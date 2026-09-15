@@ -53,12 +53,14 @@ services:
     container_name: nihaixia-updater
     environment:
       UPDATER_TOKEN: ${UPDATER_TOKEN:?set UPDATER_TOKEN to enable one-click update}
+      # 挂载的是仓库根（含 .git），git 与 compose 操作都在此目录下执行
       PROJECT_DIR: /workspace
       GIT_BRANCH: ${GIT_BRANCH:-main}
-      COMPOSE_FILE: docker-compose.yml
+      COMPOSE_FILE: app/docker-compose.yml
       SERVICE_NAME: "web api"
     volumes:
-      - .:/workspace
+      # 必须挂仓库根而不是 app/：.git 在仓库根，只挂 app/ 会让容器内 git 全部失败
+      - ..:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
     working_dir: /workspace
     restart: unless-stopped
