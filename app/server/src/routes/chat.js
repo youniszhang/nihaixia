@@ -215,9 +215,11 @@ export default async function chatRoutes(fastify) {
       fastify.log.warn({ err: String(err) }, 'chat generation failed');
       const msg =
         provider === 'dsweb' ? (
-          /未找到 Chrome|浏览器|登录|输入框|超时|风控/.test(String(err))
-            ? '网页版 DeepSeek 调用失败：' + (err.message || String(err)).slice(0, 160) + '（管理员可在「模型设置」中打开浏览器重新登录）'
-            : '网页版 DeepSeek 调用失败，请检查是否已在「模型设置」中完成登录。'
+          // 直连通道的失败原因要原样带给用户/管理员，否则只能翻服务器日志
+          '网页版 DeepSeek 调用失败：' + (err.message || String(err)).slice(0, 200)
+          + (/凭证|token|登录|未授权|401|403/i.test(String(err))
+            ? '（登录凭证可能已失效，请在管理后台「模型设置 → 粘贴登录凭证」重新导入）'
+            : '（管理员可在管理后台「模型设置」检查接入配置）')
         )
         : err.code === 'no_api_key' ? '未配置模型：请管理员在「模型设置」中填写 API Key，或切换到网页版 DeepSeek（0 Token）模式。'
         : err.code === 'auth' ? '模型服务鉴权失败（API Key 无效）。'

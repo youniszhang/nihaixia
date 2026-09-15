@@ -907,6 +907,28 @@ body {
   -webkit-backdrop-filter: blur(8px);
 }
 
+.chat-error {
+  max-width: 800px;
+  margin: 0 auto 10px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--red);
+  background: rgba(176, 58, 46, 0.06);
+  border: 1px solid rgba(176, 58, 46, 0.18);
+  border-radius: var(--radius-sm);
+}
+
+.chat-error .text-btn {
+  flex: none;
+  color: var(--red);
+  opacity: 0.8;
+}
+
 .composer {
   max-width: 800px;
   margin: 0 auto;

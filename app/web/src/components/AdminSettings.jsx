@@ -211,14 +211,14 @@ export default function AdminSettings({ onClose }) {
       ) : (
         <>
           <p className="admin-hint">
-            走 DeepSeek 网页版的对话额度，不消耗 API Token。原理：驱动一个<strong>专用浏览器</strong>（独立配置目录，
-            不影响你的日常浏览器），登录一次 chat.deepseek.com 后，问诊请求自动注入网页版并发送、抓取回复。
-            {isTauri ? '需要 Chrome/Edge；' : '服务器上由内置 Chromium + 虚拟显示运行；'}
+            走 DeepSeek 网页版的对话额度，不消耗 API Token。服务器部署用<strong>直连通道</strong>：
+            粘贴一次网页版登录凭证（userToken），服务端直接调网页版接口，无需浏览器。
+            {isTauri ? '桌面版也可改用浏览器通道（需 Chrome/Edge）。' : ''}
             网页版有频率与风控限制，请适度使用。
           </p>
           <div className="sheet-grid">
             <label className="field">
-              <span>调试端口</span>
+              <span>{isTauri ? '调试端口（浏览器通道用）' : '调试端口（浏览器通道用，服务器无需）'}</span>
               <input type="number" value={cfg.dsweb_port} onChange={set('dsweb_port')} placeholder="9223" />
             </label>
             <label className="field">
@@ -264,7 +264,7 @@ export default function AdminSettings({ onClose }) {
                 <code> Console </code>→ 粘贴执行
                 <code> copy(localStorage.getItem('userToken')) </code>→ 回车（已复制到剪贴板）→
                 粘贴到上方输入框 → 点「保存凭证并登录」。
-                <br />凭证即登录态，<strong>请勿发给他人</strong>；仅保存在你自己服务器的浏览器配置里，失效后重新获取即可。
+                <br />凭证即登录态，<strong>请勿发给他人</strong>；仅保存在你自己服务器的数据库里，失效后重新获取即可。
               </p>
               <div className="dsweb-actions">
                 <button type="button" className="btn-primary dsweb-primary" onClick={submitToken} disabled={dsBusy || !tokenInput.trim()}>

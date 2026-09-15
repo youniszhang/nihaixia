@@ -6,14 +6,16 @@
  * 网页端用官方 WASM（sha3_wasm_bg）计算——这里直接复用同一个 WASM，
  * 调用约定照搬网页端胶水代码（wasm_solve(retptr, challenge, len, prefix, len, difficulty)）。
  *
- * WASM 首次使用时从 DeepSeek 静态 CDN 下载并缓存到数据目录；算法升级时可用
- * DS_POW_WASM_URL 覆盖地址。
+ * WASM 优先取随包内置副本（app/server/assets/），其次数据目录缓存，最后才回源
+ * DeepSeek 静态 CDN——服务器常拉不到该 CDN，内置一份可让直连通道不依赖外网下载。
+ * 算法升级时可用 DS_POW_WASM_URL 覆盖地址。
  *
  * 说明：仅在「直连模式」（用 userToken 调网页版接口）下需要；浏览器通道不需要。
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import config from '../config.js';
 
 const DEFAULT_WASM_URL = 'https://fe-static.deepseek.com/chat/static/sha3_wasm_bg.7b9ca65ddd.wasm';
@@ -21,12 +23,25 @@ const DEFAULT_WASM_URL = 'https://fe-static.deepseek.com/chat/static/sha3_wasm_b
 let wasm = null;            // 实例化后的 exports
 let loadPromise = null;     // 并发保护
 
+let __dirnameSafe = '.';
+try {
+  __dirnameSafe = path.dirname(fileURLToPath(import.meta.url));
+} catch { /* SEA/CJS bundle: import.meta unavailable → 用 cwd 相对路径兜底 */ }
+
+function bundledFilePath() {
+  return path.resolve(__dirnameSafe, '../../assets/sha3_wasm_bg.wasm');
+}
+
 function cacheFilePath() {
   const dir = path.dirname(config.dbPath);
   return path.join(dir, 'ds-pow.sha3.wasm');
 }
 
 async function loadWasmBytes() {
+  try {
+    const buf = fs.readFileSync(bundledFilePath());
+    if (buf.length > 1024) return buf;
+  } catch { /* 未内置（开发/SEA 场景）→ 走缓存 */ }
   const cached = cacheFilePath();
   try {
     const buf = fs.readFileSync(cached);

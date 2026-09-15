@@ -26,6 +26,7 @@ export default function ChatPage() {
   );
   const [intakeNote, setIntakeNote] = useState(''); // pinned summary (十问/舌象) for active session
   const [sessionTitle, setSessionTitle] = useState('');
+  const [errNote, setErrNote] = useState(''); // 最近一次生成失败的原因（常驻到下次发送）
 
   function acceptDisclaimer() {
     try { localStorage.setItem(DISCLAIMER_SEEN_KEY, '1'); } catch { /* private mode */ }
@@ -105,6 +106,7 @@ export default function ChatPage() {
     setMessages((m) => [...m, userMsg]);
     setInput('');
     setStreaming(true);
+    setErrNote('');
 
     const asstMsg = { id: `tmp-${Date.now()}-a`, role: 'assistant', content: '' };
     setMessages((m) => [...m, asstMsg]);
@@ -124,14 +126,14 @@ export default function ChatPage() {
           // 中间提示（如自动重启浏览器重试）：临时显示在占位气泡里
           setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc || `> ℹ️ ${ev.text}` } : x)));
         } else if (ev.type === 'error') {
-          setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc + (acc ? '\n\n' : '') + `> ⚠️ ${ev.message}` } : x)));
+          // 失败原因单独保存：finally 里会用服务端持久化的消息覆盖气泡，
+          // 只写进气泡的话错误会在刷新后消失，用户完全看不到发生了什么
+          setErrNote(ev.message);
           break;
         }
       }
     } catch (e) {
-      if (e.name !== 'AbortError') {
-        setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc + `\n\n> ⚠️ ${e.message}` } : x)));
-      }
+      if (e.name !== 'AbortError') setErrNote(e.message || String(e));
     } finally {
       setStreaming(false);
       abortRef.current = null;
@@ -220,6 +222,12 @@ export default function ChatPage() {
         </div>
 
         <div className="composer-wrap">
+          {errNote && (
+            <div className="chat-error" role="alert">
+              <span>⚠️ {errNote}</span>
+              <button type="button" className="text-btn" onClick={() => setErrNote('')}>知道了</button>
+            </div>
+          )}
           <div className="composer">
             <textarea
               value={input}
