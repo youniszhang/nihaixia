@@ -230,6 +230,8 @@ export default async function chatRoutes(fastify) {
         : err.code === 'no_api_key' ? '未配置模型：请管理员在「模型设置」中填写 API Key，或切换到网页版 DeepSeek（0 Token）模式。'
         : err.code === 'auth' ? '模型服务鉴权失败（API Key 无效）。'
         : err.code === 'rate_limit' ? '模型服务繁忙，请稍后重试。'
+        : err.code === 'network' ? `无法连接模型服务：${(err.message || '').slice(0, 150)}`
+        : err.code === 'upstream' ? `模型服务返回错误：${(err.detail || err.message || '').slice(0, 150)}`
         : '模型服务暂不可用，请稍后再试。';
       // Keep the partial answer if any
       if (full) {
