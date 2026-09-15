@@ -2435,3 +2435,39 @@ body {
     position: static;
   }
 }
+
+/* 网页版 DeepSeek · 服务器模式：粘贴登录凭证 */
+.dsweb-token {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+
+.dsweb-token textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.dsweb-token textarea:focus {
+  outline: none;
+  border-color: var(--red);
+}
+
+.dsweb-token .admin-hint code {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.74rem;
+  font-family: var(--mono);
+}

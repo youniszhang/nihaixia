@@ -12,7 +12,9 @@ import * as path from 'node:path';
 import { execSync, spawn } from 'node:child_process';
 import { CDPClient, listTargets, newTab } from './cdp.js';
 
-const PROFILE_DIR = path.join(os.tmpdir(), 'nihaixia-dsweb-profile');
+// profile 目录：桌面版默认在系统临时目录；服务器部署用 DSWEB_PROFILE_DIR 指向
+// 持久化卷（/app/data/...），否则容器重建会丢登录态。
+const PROFILE_DIR = process.env.DSWEB_PROFILE_DIR || path.join(os.tmpdir(), 'nihaixia-dsweb-profile');
 const PIDFILE = path.join(PROFILE_DIR, '.nihaixia-launcher.json');
 
 function readPidfile() {
@@ -27,7 +29,7 @@ function pidAlive(pid) {
 }
 function isOurBrowser(pid) {
   if (!pid || !pidAlive(pid)) return false;
-  try { return execSync(`ps -p ${pid} -o command=`).toString().includes('nihaixia-dsweb-profile'); } catch { return false; }
+  try { return execSync(`ps -p ${pid} -o command=`).toString().includes(PROFILE_DIR); } catch { return false; }
 }
 function listenerPid(port) {
   try { return Number(execSync(`lsof -ti:${port} 2>/dev/null | head -1`).toString().trim()) || null; } catch { return null; }
@@ -41,6 +43,9 @@ function browserAppName(bin) {
 }
 
 export function findBrowserBinary() {
+  // 显式指定优先（服务器/自定义安装路径）
+  const explicit = process.env.CHROME_PATH;
+  if (explicit) { try { if (fs.existsSync(explicit)) return explicit; } catch {} }
   const platform = process.platform;
   const candidates =
     platform === 'darwin'
@@ -58,9 +63,10 @@ export function findBrowserBinary() {
           ]
         : [
             '/usr/bin/google-chrome',
-            '/usr/bin/chromium-browser',
             '/usr/bin/chromium',
+            '/usr/bin/chromium-browser',
             '/usr/bin/microsoft-edge',
+            '/snap/bin/chromium',
           ];
   for (const c of candidates) {
     try { if (fs.existsSync(c)) return c; } catch {}
@@ -101,13 +107,23 @@ export async function ensureBrowser(preferredPort, headless = false) {
       if (m) proxyFlag = `--proxy-server=${m[1].trim()}:${m[2]}`;
     }
   } catch {}
+  const inContainer = (() => { try { return fs.existsSync('/.dockerenv'); } catch { return false; } })();
   const flags = [
     `--remote-debugging-port=${preferredPort}`,
     `--user-data-dir=${PROFILE_DIR}`,
     '--no-first-run',
     '--no-default-browser-check',
   ];
+  // 服务器容器内：Chrome 沙箱在 Docker 默认 seccomp 下不可用，需关闭；
+  // /dev/shm 过小会崩溃，改用磁盘；无 GPU。
+  if (inContainer || process.env.DSWEB_NO_SANDBOX === 'true') {
+    flags.push('--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu');
+  }
+  // 非 macOS 环境（Xvfb 虚拟显示/Windows）：顺手压低自动化指纹
+  if (process.platform !== 'darwin') flags.push('--disable-blink-features=AutomationControlled');
   if (headless) flags.push('--headless=new', '--window-size=1400,900');
+  // Xvfb 下给窗口明确尺寸（默认可能是 0x0 或过小，影响页面渲染）
+  if (!headless && process.platform === 'linux') flags.push('--window-size=1440,900', '--window-position=0,0');
   if (proxyFlag) flags.push(proxyFlag);
   flags.push('https://chat.deepseek.com/');
   const cmdStr = JSON.stringify(bin) + ' ' + flags.map((f) => JSON.stringify(f)).join(' ');
@@ -115,12 +131,12 @@ export async function ensureBrowser(preferredPort, headless = false) {
     detached: true,
     stdio: 'ignore',
   }).unref();
-  for (let i = 0; i < 24; i++) {
+  for (let i = 0; i < 40; i++) {
     await new Promise((r) => setTimeout(r, 500));
     if (await canList(preferredPort)) {
       // 记录真实 chrome 进程 pid（spawn 拿到的是 sh 的）
       try {
-        const pid = Number(execSync(`pgrep -f "nihaixia-dsweb-profile" | head -1`).toString().trim()) || null;
+        const pid = Number(execSync(`pgrep -f "${PROFILE_DIR}" | head -1`).toString().trim()) || null;
         writePidfile({ pid, port: preferredPort });
       } catch { writePidfile({ pid: null, port: preferredPort }); }
       // 有头模式把窗口带到前台
@@ -366,7 +382,7 @@ const CLICK_SEND = `(function(){
 })()`;
 
 export function killBrowser() {
-  try { execSync('pkill -f "nihaixia-dsweb-profile"', { stdio: 'ignore' }); } catch {}
+  try { execSync(`pkill -f "${PROFILE_DIR}"`, { stdio: 'ignore' }); } catch {}
 }
 
 /**

@@ -13,7 +13,10 @@ export default function AdminSettings({ onClose }) {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [dsStatus, setDsStatus] = useState('');   // 网页版登录状态文案
+  const [hasToken, setHasToken] = useState(false); // 服务器直连模式：是否已保存登录凭证
   const [dsBusy, setDsBusy] = useState(false);
+  const [showTokenBox, setShowTokenBox] = useState(false); // 服务器模式：粘贴登录凭证
+  const [tokenInput, setTokenInput] = useState('');
   const isTauri = typeof window !== 'undefined' && !!window.__TAURI__;
 
   useEffect(() => {
@@ -28,6 +31,7 @@ export default function AdminSettings({ onClose }) {
         dsweb_expert: d.dsweb_expert !== false,
         system_mode: d.system_mode || 'auto',
       }));
+      setHasToken(Boolean(d.dsweb_has_token));
     }).catch((e) => setErr(e.message));
   }, []);
 
@@ -72,9 +76,10 @@ export default function AdminSettings({ onClose }) {
     setDsBusy(true); setDsStatus(''); setErr('');
     try {
       const r = await api.checkDswebLogin();
+      setHasToken(Boolean(r.mode === 'direct' && r.loggedIn));
       setDsStatus(r.loggedIn
-        ? '✅ 网页版已登录，可以开始 0 Token 问诊。'
-        : '⚠️ 未检测到登录。请点击「打开浏览器登录」，在窗口内完成登录后重试。');
+        ? `✅ 网页版已登录（${r.mode === 'direct' ? '直连通道' : '浏览器通道'}${r.email ? ' · ' + r.email : ''}），0 Token 问诊可用。`
+        : `⚠️ 未检测到登录${r.reason ? '：' + r.reason : ''}。${r.mode === 'direct' ? '请重新粘贴登录凭证。' : '请点击「打开浏览器登录」完成登录后重试。'}`);
     } catch (e2) {
       setDsStatus('检测失败：' + (e2.message || ''));
     } finally { setDsBusy(false); }
@@ -85,6 +90,40 @@ export default function AdminSettings({ onClose }) {
     try { await api.killDswebBrowser(); setDsStatus('已关闭专用浏览器。'); }
     catch (e2) { setDsStatus('操作失败：' + (e2.message || '')); }
     finally { setDsBusy(false); }
+  }
+
+  async function clearToken() {
+    if (!confirm('确定清除已保存的登录凭证？清除后将回退到浏览器通道（服务器上则不可用）。')) return;
+    setDsBusy(true);
+    try {
+      await api.clearDsToken();
+      setHasToken(false);
+      setDsStatus('已清除登录凭证。');
+    } catch (e2) {
+      setErr('清除失败：' + (e2.message || e2));
+    } finally { setDsBusy(false); }
+  }
+
+  // 服务器模式：提交从已登录浏览器复制的 userToken，直连校验并保存
+  async function submitToken() {
+    const t = tokenInput.trim();
+    if (!t) return;
+    setDsBusy(true); setDsStatus(''); setErr('');
+    try {
+      const r = await api.injectDsToken(t);
+      if (r.loggedIn) {
+        setHasToken(true);
+        setDsStatus(`✅ 登录成功（直连通道${r.email ? ' · ' + r.email : ''}）！0 Token 问诊已可用。`);
+        setTokenInput('');
+        setShowTokenBox(false);
+      } else {
+        setDsStatus('⚠️ 凭证已写入，但未检测到登录态（可能已过期或复制不完整）。请重新获取后重试。');
+      }
+    } catch (e2) {
+      setErr('登录失败：' + (e2.message || e2));
+    } finally {
+      setDsBusy(false);
+    }
   }
 
   // 应用内登录：前端发起 → Tauri 事件开窗 → Rust 轮询 token → 内部通道注入 → 状态轮询
@@ -172,9 +211,10 @@ export default function AdminSettings({ onClose }) {
       ) : (
         <>
           <p className="admin-hint">
-            走 DeepSeek 网页版的对话额度，不消耗 API Token。原理：驱动一个<strong>专用浏览器窗口</strong>（独立配置目录，
+            走 DeepSeek 网页版的对话额度，不消耗 API Token。原理：驱动一个<strong>专用浏览器</strong>（独立配置目录，
             不影响你的日常浏览器），登录一次 chat.deepseek.com 后，问诊请求自动注入网页版并发送、抓取回复。
-            需要 Chrome/Edge；网页版有频率与风控限制，请适度使用。
+            {isTauri ? '需要 Chrome/Edge；' : '服务器上由内置 Chromium + 虚拟显示运行；'}
+            网页版有频率与风控限制，请适度使用。
           </p>
           <div className="sheet-grid">
             <label className="field">
@@ -190,14 +230,49 @@ export default function AdminSettings({ onClose }) {
             </label>
           </div>
           <div className="dsweb-actions">
-            {isTauri && (
-              <button type="button" className="btn-primary dsweb-primary" onClick={inAppLogin} disabled={dsBusy}>🔑 应用内登录（推荐）</button>
+            {isTauri ? (
+              <>
+                <button type="button" className="btn-primary dsweb-primary" onClick={inAppLogin} disabled={dsBusy}>🔑 应用内登录（推荐）</button>
+                <button type="button" className="btn-ghost" onClick={openLogin} disabled={dsBusy}>🌐 打开浏览器登录</button>
+              </>
+            ) : (
+              <button type="button" className={`${hasToken ? 'btn-ghost' : 'btn-primary dsweb-primary'}`} onClick={() => setShowTokenBox((v) => !v)} disabled={dsBusy}>
+                {hasToken ? '🔐 登录凭证已配置（点击更换）' : '🔐 粘贴登录凭证'}
+              </button>
             )}
-            <button type="button" className="btn-ghost" onClick={openLogin} disabled={dsBusy}>🌐 打开浏览器登录</button>
+            {!isTauri && hasToken && (
+              <button type="button" className="btn-ghost" onClick={clearToken} disabled={dsBusy}>✕ 清除凭证</button>
+            )}
             <button type="button" className="btn-ghost" onClick={checkLogin} disabled={dsBusy}>🔍 检测登录状态</button>
             <button type="button" className="btn-ghost" onClick={killBrowser} disabled={dsBusy}>✕ 关闭专用浏览器</button>
           </div>
-          {!isTauri && <p className="sheet-msg">提示：当前是网页/服务器模式，「应用内登录」仅在桌面版可用。</p>}
+
+          {!isTauri && showTokenBox && (
+            <div className="dsweb-token">
+              <label className="field">
+                <span>登录凭证 userToken</span>
+                <textarea
+                  rows={3}
+                  value={tokenInput}
+                  onChange={(e) => setTokenInput(e.target.value)}
+                  placeholder="粘贴 userToken（一长串字符）"
+                />
+              </label>
+              <p className="admin-hint">
+                <strong>怎么获取</strong>：在你自己电脑的浏览器里打开并登录
+                <code> chat.deepseek.com </code>→ 按 <code>F12</code> 打开开发者工具 → 切到
+                <code> Console </code>→ 粘贴执行
+                <code> copy(localStorage.getItem('userToken')) </code>→ 回车（已复制到剪贴板）→
+                粘贴到上方输入框 → 点「保存凭证并登录」。
+                <br />凭证即登录态，<strong>请勿发给他人</strong>；仅保存在你自己服务器的浏览器配置里，失效后重新获取即可。
+              </p>
+              <div className="dsweb-actions">
+                <button type="button" className="btn-primary dsweb-primary" onClick={submitToken} disabled={dsBusy || !tokenInput.trim()}>
+                  {dsBusy ? '验证中…' : '保存凭证并登录'}
+                </button>
+              </div>
+            </div>
+          )}
           {dsStatus && <p className="sheet-msg">{dsStatus}</p>}
         </>
       )}

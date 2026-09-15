@@ -3,7 +3,8 @@ import { sendError, clamp } from '../lib/validate.js';
 import { retrieve } from '../knowledge/loader.js';
 import { SYSTEM_PROMPT, buildRagBlock } from '../knowledge/system-prompt.js';
 import { streamChat } from '../llm.js';
-import { connectDeepSeek, askStream, killBrowser } from '../lib/dsweb.js';
+import { connectDeepSeek, askStream, killBrowser, findBrowserBinary } from '../lib/dsweb.js';
+import { askDirect } from '../lib/dsapi.js';
 import config from '../config.js';
 
 function sse(res, data) {
@@ -108,7 +109,6 @@ export default async function chatRoutes(fastify) {
       sse(reply, { type: 'start', user_msg_id: userMsgId });
       if (provider === 'dsweb') {
         // —— 网页版 DeepSeek（0 Token）：把系统指令与问诊上下文并入单条网页消息 ——
-        // 浏览器可能已死（重启电脑/被杀），失败自动重启并重试一次
         const dsPort = Number(getSetting('dsweb_port') || 9223);
         const dsExpert = getSetting('dsweb_expert') !== 'false';
         const compactRag = chunks.length
@@ -122,7 +122,39 @@ export default async function chatRoutes(fastify) {
           '【病人发言】\n' + content,
         ].filter(Boolean).join('\n\n');
 
-        const runOnce = async function* () {
+        // 优先走「直连通道」：用管理员配置的登录凭证直接调网页版接口（无需浏览器，
+        // 服务器部署也能用）。未配置凭证时回退到浏览器自动化通道。
+        const dsToken = getSetting('dsweb_user_token') || process.env.DSWEB_USER_TOKEN;
+        if (dsToken) {
+          try {
+            for await (const ev of askDirect(dsToken, { prompt: webPrompt, expertMode: dsExpert })) {
+              if (ev.type === 'delta') { full += ev.text; sse(reply, { type: 'delta', text: ev.text }); }
+              else if (ev.type === 'done') break;
+            }
+          } catch (directErr) {
+            fastify.log.warn({ err: String(directErr) }, 'dsweb direct channel failed');
+            if (!findBrowserBinary()) {
+              const e = new Error(
+                '网页版直连失败：' + (directErr.message || String(directErr)).slice(0, 140)
+                + '（若是凭证过期，请在管理后台「模型设置 → 粘贴登录凭证」重新导入）'
+              );
+              e.code = 'dsweb_direct';
+              throw e;
+            }
+            // 本机有浏览器（桌面版）：回退浏览器通道，尽量把答案给到用户
+            sse(reply, { type: 'notice', text: '直连通道异常，改用浏览器通道重试…' });
+            const client = await connectDeepSeek(dsPort, false);
+            try {
+              for await (const ev of askStream(client, { prompt: webPrompt, expertMode: dsExpert })) {
+                if (ev.type === 'delta') { full += ev.text; sse(reply, { type: 'delta', text: ev.text }); }
+                else if (ev.type === 'done') break;
+              }
+            } finally {
+              client.close();
+            }
+          }
+        } else {
+          const runOnce = async function* () {
           const client = await connectDeepSeek(dsPort, false);
           try {
             for await (const ev of askStream(client, { prompt: webPrompt, expertMode: dsExpert })) {
@@ -146,6 +178,7 @@ export default async function chatRoutes(fastify) {
           for await (const ev of runOnce()) {
             if (ev.type === 'delta') { full += ev.text; sse(reply, { type: 'delta', text: ev.text }); }
             else if (ev.type === 'done') break;
+          }
           }
         }
       } else {
