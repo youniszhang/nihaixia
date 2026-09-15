@@ -63,11 +63,13 @@ log "✅ .env 就绪（$(wc -l < .env) 行）"
 
 # ---- 4. 构建 + 启动 ----
 log "▶ docker compose up -d --build（首次约 3-8 分钟）…"
+# 兼容旧版本遗留的固定容器名（nihaixia-updater）——先清掉，避免重建时撞名
+docker rm -f nihaixia-updater >/dev/null 2>&1 || true
 rc=0
 if grep -q '^UPDATER_TOKEN=' .env 2>/dev/null; then
-  $DC --profile updater up -d --build || rc=$?
+  $DC --profile updater up -d --build --remove-orphans || rc=$?
 else
-  $DC up -d --build || rc=$?
+  $DC up -d --build --remove-orphans || rc=$?
 fi
 if [ "$rc" -ne 0 ]; then
   log "❌ 构建/启动失败（exit=$rc）"
