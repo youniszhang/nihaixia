@@ -28,7 +28,7 @@ export default async function authRoutes(fastify) {
       return sendError(reply, 'registration_closed', '本站已关闭注册，请联系管理员开通账号', 403);
     }
     const { username, password } = req.body || {};
-    if (!isValidUsername(username)) return sendError(reply, 'bad_username', '用户名需 2-24 位，仅支持中英文、数字、下划线');
+    if (!isValidUsername(username)) return sendError(reply, 'bad_username', '用户名需 2-24 位（中英文、数字、下划线），或使用邮箱地址');
     if (!isValidPassword(password)) return sendError(reply, 'bad_password', '密码长度需 6-72 位');
     const name = username.trim();
     if (findUserByName(name)) return sendError(reply, 'username_taken', '该用户名已被注册', 409);

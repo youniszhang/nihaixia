@@ -197,7 +197,13 @@ export function createUser(username, passwordHash) {
   return { id: r.lastInsertRowid, username };
 }
 export function findUserByName(username) {
-  return db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+  // 邮箱形式用户名大小写不敏感（Gmail 等邮箱本身不区分大小写）；
+  // 普通用户名仍精确匹配（兼容历史上区分大小写的账号）。
+  const s = String(username || '').trim();
+  if (s.includes('@')) {
+    return db.prepare('SELECT * FROM users WHERE lower(username) = lower(?)').get(s);
+  }
+  return db.prepare('SELECT * FROM users WHERE username = ?').get(s);
 }
 export function findUserById(id) {
   return db.prepare('SELECT id, username, created_at FROM users WHERE id = ?').get(id);

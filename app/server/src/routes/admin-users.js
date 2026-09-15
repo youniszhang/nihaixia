@@ -78,7 +78,7 @@ export default async function adminUserRoutes(fastify) {
   fastify.post('/users', admin, async (req, reply) => {
     if (!requireAdmin(req, reply)) return;
     const { username, password, note } = req.body || {};
-    if (!isValidUsername(username)) return sendError(reply, 'bad_username', '用户名需 2-24 位，仅支持中英文、数字、下划线');
+    if (!isValidUsername(username)) return sendError(reply, 'bad_username', '用户名需 2-24 位（中英文、数字、下划线），或使用邮箱地址');
     if (!isValidPassword(password)) return sendError(reply, 'bad_password', '密码长度需 6-72 位');
     const name = username.trim();
     if (findUserByName(name)) return sendError(reply, 'username_taken', '该用户名已被注册', 409);
@@ -113,7 +113,7 @@ export default async function adminUserRoutes(fastify) {
 
     if (b.username != null) {
       const name = String(b.username).trim();
-      if (!isValidUsername(name)) return sendError(reply, 'bad_username', '用户名需 2-24 位，仅支持中英文、数字、下划线');
+      if (!isValidUsername(name)) return sendError(reply, 'bad_username', '用户名需 2-24 位（中英文、数字、下划线），或使用邮箱地址');
       if (name !== target.username) {
         if (targetAdmin) return sendError(reply, 'admin_rename', '不能重命名管理员账号（请直接改 .env 的 ADMIN_USERNAME）');
         const dup = findUserByName(name);

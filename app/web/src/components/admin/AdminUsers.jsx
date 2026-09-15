@@ -311,7 +311,7 @@ export default function AdminUsers({ onViewConversations }) {
               <input
                 value={form.username}
                 onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
-                placeholder="2-24 位，中英文/数字/下划线"
+                placeholder="2-24 位用户名，或邮箱地址"
                 autoFocus
               />
             </label>

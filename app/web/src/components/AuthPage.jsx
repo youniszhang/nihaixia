@@ -79,7 +79,7 @@ export default function AuthPage() {
 
           <label className="field">
             <span>用户名</span>
-            <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="2-24 位，中英文、数字、下划线" autoComplete="username" required />
+            <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="用户名或邮箱，如 youniszhang1024@gmail.com" autoComplete="username" required />
           </label>
           <label className="field">
             <span>密码</span>
