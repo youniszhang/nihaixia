@@ -1,7 +1,7 @@
 import { createUser, findUserByName, findUserById, getSetting, setSetting, isAdminUser, touchLogin, registrationAllowed, registrationRequiresBootstrap, configuredAdminUsername } from '../db.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import { issueToken, cookieOptions } from '../lib/auth.js';
-import { isValidUsername, isValidPassword, sendError, clamp } from '../lib/validate.js';
+import { isValidUsername, isValidPassword, sendError } from '../lib/validate.js';
 
 function withRole(user) {
   return { ...user, is_admin: isAdminUser(user) };

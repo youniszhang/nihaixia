@@ -245,18 +245,38 @@ export function getUserTokenVersion(id) {
 export function bumpTokenVersion(id) {
   db.prepare('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?').run(id);
 }
-// 批量操作：ids 为数字数组，返回实际影响条数
+// 批量操作：ids 为数字数组，返回实际影响条数。
+// 整体包在事务里：任一失败则全部回滚，避免"禁用了一半"的中间态。
 export function bulkSetUserStatus(ids, status) {
   const stmt = db.prepare('UPDATE users SET status = ? WHERE id = ?');
-  let n = 0;
-  for (const id of ids) { stmt.run(status, id); if (status === 'disabled') bumpTokenVersion(id); n++; }
-  return n;
+  const bump = db.prepare('UPDATE users SET token_version = COALESCE(token_version,0) + 1 WHERE id = ?');
+  db.exec('BEGIN');
+  try {
+    let n = 0;
+    for (const id of ids) {
+      stmt.run(status, id);
+      if (status === 'disabled') bump.run(id);
+      n++;
+    }
+    db.exec('COMMIT');
+    return n;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 }
 export function bulkDeleteUsers(ids) {
   const stmt = db.prepare('DELETE FROM users WHERE id = ?');
-  let n = 0;
-  for (const id of ids) { stmt.run(id); n++; }
-  return n;
+  db.exec('BEGIN');
+  try {
+    let n = 0;
+    for (const id of ids) { stmt.run(id); n++; }
+    db.exec('COMMIT');
+    return n;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 }
 
 // ---------- admin: audit ----------
@@ -271,13 +291,18 @@ export function listAudit(limit = 100) {
     FROM audit_log ORDER BY id DESC LIMIT ?`).all(Math.min(Number(limit) || 100, 500));
 }
 
+// LIKE 查询的通配符转义：用户输入含 % _ \ 时按字面匹配，避免"输入 % 命中全部"
+function escapeLike(str) {
+  return String(str).replace(/[\\%_]/g, (m) => '\\' + m);
+}
+
 // ---------- admin: conversations ----------
 // 全站会话列表（可按用户过滤 / 关键词搜标题）
 export function adminListSessions({ userId = null, q = '', limit = 50, offset = 0 } = {}) {
   const where = [];
   const params = [];
   if (userId) { where.push('s.user_id = ?'); params.push(userId); }
-  if (q) { where.push('s.title LIKE ?'); params.push(`%${q}%`); }
+  if (q) { where.push("s.title LIKE ? ESCAPE '\\'"); params.push(`%${escapeLike(q)}%`); }
   const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
   const rows = db.prepare(`
     SELECT s.id, s.user_id, s.title, s.created_at, s.updated_at, u.username,
@@ -303,8 +328,8 @@ export function adminSearchMessages(q, limit = 50) {
     FROM messages m
     JOIN sessions s ON s.id = m.session_id
     JOIN users u ON u.id = s.user_id
-    WHERE m.content LIKE ?
-    ORDER BY m.id DESC LIMIT ?`).all(`%${q}%`, limit);
+    WHERE m.content LIKE ? ESCAPE '\\'
+    ORDER BY m.id DESC LIMIT ?`).all(`%${escapeLike(q)}%`, limit);
 }
 
 // ---------- admin: usage / reports ----------

@@ -64,12 +64,11 @@ export default async function adminUserRoutes(fastify) {
   fastify.get('/users', admin, async (req, reply) => {
     if (!requireAdmin(req, reply)) return;
     const users = listUsersWithStats();
-    const adminId = getSetting('admin_user_id');
     return {
       users: users.map((u) => ({
         ...u,
-        is_admin: isConfiguredAdmin(u.username)
-          || (!configuredAdminUsername() && adminId != null && String(u.id) === String(adminId)),
+        // 与登录态判定同源，避免"列表说不是管理员、登录后是"的不一致
+        is_admin: isAdminIdentity(u),
         is_self: String(u.id) === String(req.user.id),
       })),
       admin_source: configuredAdminUsername() ? 'env' : 'legacy',
