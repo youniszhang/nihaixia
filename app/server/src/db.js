@@ -114,6 +114,9 @@ export function deleteSetting(key) {
   db.prepare('DELETE FROM settings WHERE key = ?').run(key);
 }
 
+// 一次性修正（2026-09-15）：每日问诊上限在功能联调时被设为测试值 1，恢复为常用值 30
+if (getSetting('daily_chat_limit') === '1') setSetting('daily_chat_limit', '30');
+
 // ---------- 管理员判定 ----------
 // 优先级：ADMIN_USERNAME（.env，唯一权威来源）> admin_user_id（老部署兼容）
 // 设计变更（2026-09）：管理员写在配置文件里，不再由「第一个注册的用户」自动担任。
@@ -344,10 +347,10 @@ export function logUsage({ userId, sessionId = null, provider = 'api', model = '
     VALUES (?,?,?,?,?,?)`).run(userId, sessionId, provider, model, promptChars, completionChars);
 }
 
-// 当日已成功问诊次数（按 usage_log；UTC 日界，与用量报表一致）
+// 当日已成功问诊次数（按 usage_log；北京自然日，容器 TZ=Asia/Shanghai）
 export function usageCountToday(userId) {
   return db.prepare(`SELECT COUNT(*) AS n FROM usage_log
-    WHERE user_id = ? AND date(created_at) = date('now')`).get(userId)?.n || 0;
+    WHERE user_id = ? AND date(created_at, 'localtime') = date('now', 'localtime')`).get(userId)?.n || 0;
 }
 
 export function usageSummary() {
@@ -362,13 +365,13 @@ export function usageSummary() {
 
 export function usageDaily(days = 14) {
   return db.prepare(`
-    SELECT date(created_at) AS day,
+    SELECT date(created_at, 'localtime') AS day,
       COUNT(*) AS calls,
       COUNT(DISTINCT user_id) AS users,
       COALESCE(SUM(prompt_chars),0) AS prompt_chars,
       COALESCE(SUM(completion_chars),0) AS completion_chars
     FROM usage_log
-    WHERE date(created_at) >= date('now', ?)
+    WHERE date(created_at, 'localtime') >= date('now', 'localtime', ?)
     GROUP BY day ORDER BY day ASC`).all(`-${Number(days) - 1} days`);
 }
 
