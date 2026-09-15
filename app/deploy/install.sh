@@ -59,12 +59,17 @@ else
       DOMAIN="${DOMAIN%%/*}"
       DOMAIN="${DOMAIN%%:*}"
     fi
+  else
+    # 反代模式：必须用 ":80"（只监听明文 HTTP，接受任意 Host）。
+    # 若留 localhost，Caddy 会按站点自动启用 HTTPS 并把所有请求 308 跳到 https，
+    # 反代后端拿到的是重定向而非响应。
+    DOMAIN=":80"
   fi
 
   if [ "$ENABLE_UPDATER" = "y" ]; then
     UPD_TOKEN="$(openssl rand -hex 32)"
     UPDATER_LINES="UPDATER_TOKEN=$UPD_TOKEN
-UPDATER_URL=http://nihaixia-updater:8765"
+UPDATER_URL=http://updater:8765"
     echo "   已生成更新令牌（勿泄露）"
   fi
 

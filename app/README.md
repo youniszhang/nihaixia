@@ -215,7 +215,7 @@ docker compose up -d --build
 # 首次启用 updater（服务器执行）
 cd /root/nihaixia/app
 echo "UPDATER_TOKEN=$(openssl rand -hex 32)" >> .env
-echo "UPDATER_URL=http://nihaixia-updater:8765" >> .env
+echo "UPDATER_URL=http://updater:8765" >> .env
 docker compose --profile updater up -d --build
 ```
 

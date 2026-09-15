@@ -45,12 +45,14 @@ services:
 
   # 一键更新容器（可选，启用需在 .env 配置 UPDATER_TOKEN）
   # 不映射公网端口，仅 docker 内网可达；挂载 docker.sock 执行镜像重建。
+  # 注意：不要设 container_name —— 固定容器名会在 up -d --build 重建时
+  # 与旧容器争抢同名（Conflict / already in use），导致部署失败。
+  # 容器间访问用 compose 服务名 DNS：http://updater:8765
   updater:
     profiles: ["updater"]
     build:
       context: ./server
       dockerfile: updater/Dockerfile
-    container_name: nihaixia-updater
     environment:
       UPDATER_TOKEN: ${UPDATER_TOKEN:?set UPDATER_TOKEN to enable one-click update}
       # 挂载的是仓库根（含 .git），git 与 compose 操作都在此目录下执行

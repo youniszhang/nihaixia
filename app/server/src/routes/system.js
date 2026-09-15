@@ -2,7 +2,7 @@
 // 设计参考 FileCodeBox 复盘手册：异步任务 + 状态轮询 + 不暴露 updater 到公网。
 //
 // 环境变量（服务器 /root/nihaixia/app/.env 配置）：
-//   UPDATER_URL    例如 http://nihaixia-updater:8765
+//   UPDATER_URL    例如 http://updater:8765
 //   UPDATER_TOKEN  与 updater 容器共享的长随机串
 // 未配置时接口返回「未启用」，桌面版无此能力。
 
