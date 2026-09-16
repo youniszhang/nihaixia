@@ -196,6 +196,11 @@ body {
   color: var(--text);
 }
 
+/* 只剩一个页签（注册已关闭）时不拉满整行，保持「当前页」指示语义 */
+.auth-tabs.single button {
+  flex: none;
+}
+
 /* ===== Fields ===== */
 .field {
   display: block;

@@ -11,7 +11,8 @@ export default function AuthPage() {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   // 注册开关：服务端公开配置决定（bootstrap = 空库首次部署，必须允许建管理员）
-  const [regOpen, setRegOpen] = useState(true);
+  // 默认关闭：配置还没到达或读取失败时不露出注册入口，宁可不显示也不要误开
+  const [regOpen, setRegOpen] = useState(false);
   const [bootstrap, setBootstrap] = useState(false);
 
   useEffect(() => {
@@ -21,7 +22,7 @@ export default function AuthPage() {
         setBootstrap(Boolean(c.bootstrap));
         if (c.bootstrap) setMode('register');
       })
-      .catch(() => { /* 配置读取失败时保持默认（显示注册入口） */ });
+      .catch(() => { /* 配置读取失败时保持默认（不显示注册入口） */ });
   }, []);
 
   // 开关关闭后，若用户正停留在注册页则自动切回登录
@@ -63,7 +64,8 @@ export default function AuthPage() {
 
       <div className="auth-panel">
         <form className="auth-card" onSubmit={onSubmit}>
-          <div className="auth-tabs" role="tablist">
+          {/* 关闭注册后只剩一个页签，用 single 收窄，避免红色下划线被拉满整行 */}
+          <div className={`auth-tabs ${regOpen ? '' : 'single'}`} role="tablist">
             <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'active' : ''} onClick={() => { setMode('login'); setErr(''); }}>登录</button>
             {regOpen && (
               <button type="button" role="tab" aria-selected={mode === 'register'} className={mode === 'register' ? 'active' : ''} onClick={() => { setMode('register'); setErr(''); }}>注册</button>
@@ -79,7 +81,7 @@ export default function AuthPage() {
 
           <label className="field">
             <span>用户名</span>
-            <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="用户名或邮箱" autoComplete="username" required />
+            <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
           </label>
           <label className="field">
             <span>密码</span>
