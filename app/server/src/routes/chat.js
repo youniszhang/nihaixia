@@ -1,4 +1,4 @@
-import { getSession, addMessage, touchSession, countMessages, renameSession, getProfile, listRecentMessages, updateSessionPin, getSetting, logUsage, usageCountToday } from '../db.js';
+import { getSession, addMessage, touchSession, countMessages, renameSession, getProfile, listRecentMessages, updateSessionPin, getSetting, logUsage, usageCountToday, resolveQuota, consumeCredit } from '../db.js';
 import { sendError, clamp } from '../lib/validate.js';
 import { retrieve } from '../knowledge/loader.js';
 import { SYSTEM_PROMPT, buildRagBlock } from '../knowledge/system-prompt.js';
@@ -37,11 +37,30 @@ export default async function chatRoutes(fastify) {
     const session = getSession(sessionId);
     if (!session || session.user_id !== req.user.id) return sendError(reply, 'not_found', '问诊会话不存在', 404);
 
-    // 每日问诊上限（每用户，按当日成功生成计数；站点设置 daily_chat_limit，0 = 不限）
-    const dailyLimit = Number(getSetting('daily_chat_limit') || 0);
-    if (dailyLimit > 0 && usageCountToday(req.user.id) >= dailyLimit) {
-      return sendError(reply, 'daily_limit', `今日问诊次数已达上限（每天 ${dailyLimit} 次），请明天再来，或联系管理员在「站点设置」调整。`, 429);
+    // 问诊额度（每用户）：
+    //   1) 剩余额度（users.credits；不限次账号为 null）用尽后直接拒绝，引导去签到/订阅
+    //   2) 每日上限，优先级「用户专属 > 生效套餐 > 站点默认」（站点 0 = 不限）
+    const quota = resolveQuota(req.user.id);
+    if (!quota.unlimited && quota.credits <= 0) {
+      return sendError(reply, 'no_credits', '问诊额度已用完。可在「每日签到」中领取额度，或开通订阅套餐后继续。', 402);
     }
+    if (quota.daily_limit > 0 && quota.used_today >= quota.daily_limit) {
+      const src = quota.daily_limit_source === 'user' ? '（管理员为该账号设置）'
+        : quota.daily_limit_source === 'plan' ? `（当前套餐「${quota.subscription?.plan_name || ''}」）`
+        : '（站点默认）';
+      return sendError(reply, 'daily_limit', `今日问诊次数已达上限（每天 ${quota.daily_limit} 次）${src}，请明天再来。`, 429);
+    }
+
+    // 扣额度：与 usage_log 同点发生，保证「计数」与「扣费」不会各算各的
+    const chargeCredit = (note) => {
+      try { consumeCredit(req.user.id, note); } catch { /* 记账失败不影响对话 */ }
+    };
+    const quotaSnapshot = () => {
+      try {
+        const q = resolveQuota(req.user.id);
+        return { credits: q.credits, unlimited: q.unlimited, daily_limit: q.daily_limit, used_today: q.used_today };
+      } catch { return null; }
+    };
 
     // Persist an updated intake pin (十问/舌象) if the client sent one
     const activePin = pin || session.pin || '';
@@ -213,7 +232,8 @@ export default async function chatRoutes(fastify) {
             completionChars: full.length,
           });
         } catch { /* 统计失败不影响对话 */ }
-        sse(reply, { type: 'done', message_id: asstId });
+        chargeCredit(`问诊消耗 · ${provider}`);
+        sse(reply, { type: 'done', message_id: asstId, quota: quotaSnapshot() });
       } else {
         sse(reply, { type: 'error', message: '本次未收到有效回复，请重试。' });
       }
@@ -246,7 +266,8 @@ export default async function chatRoutes(fastify) {
             completionChars: full.length,
           });
         } catch { /* ignore */ }
-        sse(reply, { type: 'done', message_id: asstId });
+        chargeCredit(`中断返回消耗 · ${provider}`);
+        sse(reply, { type: 'done', message_id: asstId, quota: quotaSnapshot() });
       } else {
         sse(reply, { type: 'error', message: msg });
       }

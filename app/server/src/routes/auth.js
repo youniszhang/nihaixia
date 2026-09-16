@@ -1,4 +1,4 @@
-import { createUser, findUserByName, findUserById, getSetting, setSetting, isAdminUser, touchLogin, registrationAllowed, registrationRequiresBootstrap, configuredAdminUsername } from '../db.js';
+import { createUser, findUserByName, findUserById, getSetting, setSetting, isAdminUser, touchLogin, registrationAllowed, registrationRequiresBootstrap, configuredAdminUsername, applyDefaultCredits } from '../db.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import { issueToken, cookieOptions } from '../lib/auth.js';
 import { isValidUsername, isValidPassword, sendError } from '../lib/validate.js';
@@ -38,6 +38,8 @@ export default async function authRoutes(fastify) {
     // 兼容老部署：空库首个注册用户记为 admin_user_id。
     // 若 .env 配了 ADMIN_USERNAME，则以配置文件为准（此记录不生效）。
     if (getSetting('admin_user_id') == null) setSetting('admin_user_id', String(user.id));
+    // 开户额度：站点设了 default_credits 才生效（留空 = 不限次）
+    try { applyDefaultCredits(user.id); } catch { /* 开户失败不影响注册 */ }
     touchLogin(user.id);
     const token = issueToken(user);
     reply.setCookie('nhx_token', token, cookieOptions);

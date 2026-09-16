@@ -8,11 +8,16 @@
 
 import {
   isAdminUser, listUsersWithStats, setUserStatus, setUserNote, setUserPassword,
-  renameUser, deleteUser, findUserById, findUserByName, createUser, getSetting, setSetting,
+  renameUser, deleteUser, findUserById, findUserByName, createUser, getSetting, setSetting, deleteSetting,
   getSession, adminListSessions, adminGetSessionMessages, adminSearchMessages,
   usageSummary, usageDaily, usageByUser, usageByProvider,
   bulkSetUserStatus, bulkDeleteUsers, addAudit, listAudit,
   registrationAllowed, registrationIsExplicit, configuredAdminUsername, isAdminIdentity,
+  setUserCredits, setUserDailyLimit, getUserCredits, resolveQuota, applyDefaultCredits,
+  listPlans, getPlan, createPlan, updatePlan, deletePlan,
+  listSubscriptions, subscriptionStats, approveSubscription, rejectSubscription,
+  cancelSubscriptionById, applySubscription, pendingSubscription, expireSubscriptions,
+  getCheckinSettings, checkinSummary, checkinDaily, listCheckins, listCreditLog,
 } from '../db.js';
 import { hashPassword } from '../lib/password.js';
 import { isValidUsername, isValidPassword, sendError, clamp } from '../lib/validate.js';
@@ -85,6 +90,8 @@ export default async function adminUserRoutes(fastify) {
     const hash = await hashPassword(password);
     const user = createUser(name, hash);
     if (note != null) setUserNote(user.id, clamp(String(note), 200));
+    // 新用户默认额度（站点设置 default_credits；留空 = 不限次）
+    try { applyDefaultCredits(user.id); } catch { /* 开户失败不影响创建 */ }
     addAudit({ actor: req.user, action: 'user.create', target: name, detail: '管理员创建账号' });
     return reply.code(201).send({ user: listUsersWithStats().find((u) => u.id === user.id) || findUserById(user.id) });
   });
@@ -132,6 +139,33 @@ export default async function adminUserRoutes(fastify) {
       if (!isValidPassword(String(b.password))) return sendError(reply, 'bad_password', '密码长度需 6-72 位');
       setUserPassword(id, await hashPassword(String(b.password)));
       changes.push('密码已重置（旧登录已失效）');
+    }
+
+    // 额度：绝对值（credits=null/'' 表示不限次）或相对增量（credit_delta，可负）
+    if (b.credits !== undefined) {
+      const raw = b.credits;
+      const next = (raw === null || raw === '') ? null : Math.max(0, Math.floor(Number(raw)));
+      if (next !== null && !Number.isFinite(next)) return sendError(reply, 'bad_credits', '额度需为 0 或正整数（留空 = 不限次）');
+      setUserCredits(id, next, 'admin', `管理员 ${req.user.username} 调整`);
+      changes.push(next === null ? '额度改为不限次' : `额度设为 ${next} 次`);
+    }
+    if (b.credit_delta != null && b.credit_delta !== '' && b.credit_delta !== 0) {
+      const delta = Math.floor(Number(b.credit_delta));
+      if (!Number.isFinite(delta) || delta === 0) return sendError(reply, 'bad_delta', '增减额度需为非 0 整数');
+      const cur = getUserCredits(id);
+      if (cur === null) return sendError(reply, 'unlimited', '该账号为不限次，请先设定一个额度再增减', 400);
+      const next = Math.max(0, cur + delta);
+      setUserCredits(id, next, 'admin', `管理员 ${req.user.username} ${delta > 0 ? '增加' : '扣减'} ${Math.abs(delta)} 次`);
+      changes.push(`额度 ${delta > 0 ? '+' : '−'}${Math.abs(delta)} → ${next} 次`);
+    }
+
+    // 每日上限：null = 跟随套餐/站点
+    if (b.daily_chat_limit !== undefined) {
+      const raw = b.daily_chat_limit;
+      const next = (raw === null || raw === '') ? null : Math.max(0, Math.floor(Number(raw)));
+      if (next !== null && !Number.isFinite(next)) return sendError(reply, 'bad_limit', '每日上限需为 0 或正整数');
+      setUserDailyLimit(id, next);
+      changes.push(next === null ? '每日上限跟随套餐/站点' : `每日上限设为 ${next || 0} 次${next ? '' : '（不限）'}`);
     }
 
     if (changes.length) addAudit({ actor: req.user, action: 'user.update', target: target.username, detail: changes.join('；') });
@@ -233,15 +267,30 @@ export default async function adminUserRoutes(fastify) {
   });
 
   // ---------- 站点设置 ----------
-  fastify.get('/site', admin, async (req, reply) => {
-    if (!requireAdmin(req, reply)) return;
+  const siteState = () => {
+    const cs = getCheckinSettings();
     return {
       registration_enabled: registrationAllowed(),
       registration_explicit: registrationIsExplicit(),
       admin_username: configuredAdminUsername(),
       admin_source: configuredAdminUsername() ? 'env' : 'legacy',
       daily_chat_limit: Number(getSetting('daily_chat_limit') || 0),
+      // 签到 / 人机校验
+      checkin_enabled: cs.enabled,
+      checkin_reward: cs.reward,
+      checkin_streak_bonus: cs.streakBonus,
+      checkin_streak_bonus_max: cs.streakBonusMax,
+      turnstile_site_key: cs.siteKey,
+      // 只回「是否已配 secret」，不把密钥回传给浏览器
+      turnstile_secret_set: Boolean(cs.secretKey),
+      turnstile_active: cs.captchaEnabled,
+      default_credits: getSetting('default_credits') ?? '',
     };
+  };
+
+  fastify.get('/site', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    return siteState();
   });
 
   fastify.put('/site', admin, async (req, reply) => {
@@ -262,13 +311,181 @@ export default async function adminUserRoutes(fastify) {
         target: `每日问诊上限 ${n}${n ? ' 次' : '（不限）'}`, detail: '',
       });
     }
+    if (b.checkin_enabled != null) {
+      setSetting('checkin_enabled', b.checkin_enabled ? 'true' : 'false');
+      addAudit({ actor: req.user, action: 'site.checkin', target: b.checkin_enabled ? '开启签到' : '关闭签到', detail: '' });
+    }
+    for (const [key, field, label, max] of [
+      ['checkin_reward', 'checkin_reward', '签到基础奖励', 1000],
+      ['checkin_streak_bonus', 'checkin_streak_bonus', '连签加成', 1000],
+      ['checkin_streak_bonus_max', 'checkin_streak_bonus_max', '加成上限', 1000],
+    ]) {
+      if (b[field] != null) {
+        const n = Math.min(Math.max(Math.floor(Number(b[field]) || 0), 0), max);
+        setSetting(key, String(n));
+        addAudit({ actor: req.user, action: 'site.checkin', target: `${label} ${n}`, detail: '' });
+      }
+    }
+    // 人机校验：只写非空值；显式传空串 = 清除
+    if (b.turnstile_site_key != null) {
+      const v = String(b.turnstile_site_key).trim().slice(0, 100);
+      if (v) setSetting('turnstile_site_key', v); else deleteSetting('turnstile_site_key');
+      addAudit({ actor: req.user, action: 'site.turnstile', target: v ? '设置 Site Key' : '清除 Site Key', detail: '' });
+    }
+    if (b.turnstile_secret_key != null) {
+      const v = String(b.turnstile_secret_key).trim().slice(0, 200);
+      if (v) setSetting('turnstile_secret_key', v); else deleteSetting('turnstile_secret_key');
+      // 密钥本身不进审计详情，只记「有没有」
+      addAudit({ actor: req.user, action: 'site.turnstile', target: v ? '设置 Secret Key' : '清除 Secret Key', detail: '' });
+    }
+    if (b.default_credits != null) {
+      const raw = String(b.default_credits).trim();
+      if (!raw) {
+        deleteSetting('default_credits');
+        addAudit({ actor: req.user, action: 'site.default_credits', target: '新用户默认额度：不限次', detail: '' });
+      } else {
+        const n = Math.min(Math.max(Math.floor(Number(raw) || 0), 0), 100000);
+        setSetting('default_credits', String(n));
+        addAudit({ actor: req.user, action: 'site.default_credits', target: `新用户默认额度 ${n} 次`, detail: '' });
+      }
+    }
+    return { ok: true, ...siteState() };
+  });
+
+  // ---------- 套餐（订阅计划） ----------
+  fastify.get('/plans', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    return { plans: listPlans({ includeInactive: true }) };
+  });
+
+  fastify.post('/plans', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const name = clamp(String(req.body?.name || '').trim(), 40);
+    if (!name) return sendError(reply, 'bad_name', '请填写套餐名称');
+    const plan = createPlan({
+      name,
+      description: clamp(String(req.body?.description || '').trim(), 200),
+      priceCents: req.body?.price_cents,
+      periodDays: req.body?.period_days,
+      dailyChatLimit: req.body?.daily_chat_limit,
+      credits: req.body?.credits,
+      sort: req.body?.sort,
+      active: req.body?.active !== false,
+    });
+    addAudit({ actor: req.user, action: 'plan.create', target: plan.name, detail: `${plan.period_days} 天 · ${plan.credits} 次额度 · 每日上限 ${plan.daily_chat_limit || '不限'}` });
+    return reply.code(201).send({ plan });
+  });
+
+  fastify.patch('/plans/:id', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const id = Number(req.params.id);
+    const plan = updatePlan(id, req.body || {});
+    if (!plan) return sendError(reply, 'not_found', '套餐不存在', 404);
+    addAudit({ actor: req.user, action: 'plan.update', target: plan.name, detail: '已更新套餐' });
+    return { plan };
+  });
+
+  fastify.delete('/plans/:id', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const id = Number(req.params.id);
+    const plan = getPlan(id);
+    if (!plan) return sendError(reply, 'not_found', '套餐不存在', 404);
+    // 已售出的订阅保留快照，删除套餐不影响老订阅（plan_id 置空即可）
+    deletePlan(id);
+    addAudit({ actor: req.user, action: 'plan.delete', target: plan.name, detail: '删除套餐（老订阅不受影响）' });
+    return { ok: true };
+  });
+
+  // ---------- 订阅管理 ----------
+  fastify.get('/subscriptions', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    expireSubscriptions();
+    const status = ['pending', 'active', 'rejected', 'expired', 'canceled'].includes(String(req.query?.status))
+      ? String(req.query.status) : null;
     return {
-      ok: true,
-      registration_enabled: registrationAllowed(),
-      registration_explicit: registrationIsExplicit(),
-      admin_username: configuredAdminUsername(),
-      admin_source: configuredAdminUsername() ? 'env' : 'legacy',
-      daily_chat_limit: Number(getSetting('daily_chat_limit') || 0),
+      subscriptions: listSubscriptions({ userId: req.query?.user_id ? Number(req.query.user_id) : null, status, limit: req.query?.limit }),
+      stats: subscriptionStats(),
+    };
+  });
+
+  // 直接为某用户开通（管理员线下收款后发放）：等同「申请 + 审批通过」
+  fastify.post('/users/:id/subscribe', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const id = Number(req.params.id);
+    const target = findUserById(id);
+    if (!target) return sendError(reply, 'not_found', '用户不存在', 404);
+    const plan = getPlan(Number(req.body?.plan_id));
+    if (!plan) return sendError(reply, 'no_plan', '套餐不存在', 404);
+    // 走与用户自助完全相同的入口，避免两条发放路径出现差异
+    const pending = pendingSubscription(id);
+    if (pending) cancelSubscriptionById(pending.id);
+    const ap = applySubscription(id, plan.id, clamp(String(req.body?.note || '').trim(), 200) || `管理员 ${req.user.username} 开通`);
+    if (!ap.ok) return sendError(reply, 'subscribe_failed', '开通失败，请稍后重试', 400);
+    const done = approveSubscription(ap.id, req.user.username);
+    addAudit({
+      actor: req.user, action: 'subscription.grant', target: target.username,
+      detail: `开通套餐「${plan.name}」，到期 ${done.expires_at || '—'}`,
+    });
+    return { ok: true, subscription: listSubscriptions({ userId: id, limit: 1 })[0] || null };
+  });
+
+  fastify.post('/subscriptions/:id/approve', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const id = Number(req.params.id);
+    const sub = listSubscriptions({ limit: 500 }).find((s) => s.id === id);
+    if (!sub) return sendError(reply, 'not_found', '订阅不存在', 404);
+    const r = approveSubscription(id, req.user.username);
+    if (!r.ok) return sendError(reply, 'approve_failed', r.code === 'already_active' ? '该订阅已生效' : '审批失败', 400);
+    addAudit({ actor: req.user, action: 'subscription.approve', target: sub.username, detail: `套餐「${sub.plan_name}」到期 ${r.expires_at || '—'}` });
+    return { ok: true, ...r };
+  });
+
+  fastify.post('/subscriptions/:id/reject', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const id = Number(req.params.id);
+    const sub = listSubscriptions({ limit: 500 }).find((s) => s.id === id);
+    if (!sub) return sendError(reply, 'not_found', '订阅不存在', 404);
+    const r = rejectSubscription(id, clamp(String(req.body?.reason || '').trim(), 200));
+    if (!r.ok) return sendError(reply, 'reject_failed', '仅待审批的申请可以驳回', 400);
+    addAudit({ actor: req.user, action: 'subscription.reject', target: sub.username, detail: `驳回套餐「${sub.plan_name}」` });
+    return { ok: true };
+  });
+
+  fastify.post('/subscriptions/:id/cancel', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const id = Number(req.params.id);
+    const sub = listSubscriptions({ limit: 500 }).find((s) => s.id === id);
+    if (!sub) return sendError(reply, 'not_found', '订阅不存在', 404);
+    cancelSubscriptionById(id);
+    addAudit({ actor: req.user, action: 'subscription.cancel', target: sub.username, detail: `撤销套餐「${sub.plan_name}」（${sub.status}）` });
+    return { ok: true };
+  });
+
+  // 单个用户的额度/订阅明细（后台用户行展开用）
+  fastify.get('/users/:id/quota', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const id = Number(req.params.id);
+    const target = findUserById(id);
+    if (!target) return sendError(reply, 'not_found', '用户不存在', 404);
+    return {
+      user: { id: target.id, username: target.username },
+      quota: resolveQuota(id),
+      subscriptions: listSubscriptions({ userId: id, limit: 20 }),
+      checkins: listCheckins(id, 30),
+      ledger: listCreditLog(id, 50),
+    };
+  });
+
+  // ---------- 签到报表 ----------
+  fastify.get('/checkins', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const days = Math.min(Math.max(Number(req.query?.days) || 14, 1), 90);
+    return {
+      summary: checkinSummary(),
+      daily: checkinDaily(days),
+      // 密钥不回传，只说明「已配置」
+      settings: (() => { const s = getCheckinSettings(); return { ...s, secretKey: undefined, secret_set: Boolean(s.secretKey) }; })(),
+      days,
     };
   });
 

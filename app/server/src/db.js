@@ -216,10 +216,17 @@ export function findUserById(id) {
 export function listUsersWithStats() {
   return db.prepare(`
     SELECT u.id, u.username, u.created_at, u.status, u.last_login_at, u.note,
+      u.credits, u.daily_chat_limit,
       (SELECT COUNT(*) FROM sessions s WHERE s.user_id = u.id) AS session_count,
       (SELECT COUNT(*) FROM messages m JOIN sessions s ON s.id = m.session_id
         WHERE s.user_id = u.id AND m.role = 'user') AS question_count,
-      (SELECT COUNT(*) FROM usage_log l WHERE l.user_id = u.id) AS call_count
+      (SELECT COUNT(*) FROM usage_log l WHERE l.user_id = u.id) AS call_count,
+      (SELECT COUNT(*) FROM checkins c WHERE c.user_id = u.id) AS checkin_count,
+      (SELECT s.plan_name FROM subscriptions s WHERE s.user_id = u.id AND s.status = 'active'
+        AND (s.expires_at IS NULL OR s.expires_at > datetime('now')) ORDER BY s.id DESC LIMIT 1) AS plan_name,
+      (SELECT s.expires_at FROM subscriptions s WHERE s.user_id = u.id AND s.status = 'active'
+        AND (s.expires_at IS NULL OR s.expires_at > datetime('now')) ORDER BY s.id DESC LIMIT 1) AS plan_expires_at,
+      (SELECT COUNT(*) FROM subscriptions s WHERE s.user_id = u.id AND s.status = 'pending') AS pending_subs
     FROM users u ORDER BY u.id ASC`).all();
 }
 export function setUserStatus(id, status) {
@@ -459,4 +466,433 @@ export function listRecentMessages(sessionId, limit = 30) {
 }
 export function countMessages(sessionId) {
   return db.prepare('SELECT COUNT(*) c FROM messages WHERE session_id = ?').get(sessionId).c;
+}
+
+// ================= 额度 / 每日打卡（签到） / 订阅 =================
+//
+// 额度语义（users.credits）：
+//   NULL   = 不限次（老账号与「未启用额度制」时的默认值，保证既有部署行为不变）
+//   整数   = 剩余问诊次数，每成功生成一次扣 1，扣到 0 后拒绝新的提问
+// 用户每日上限（users.daily_chat_limit）：
+//   NULL   = 跟随套餐 / 站点默认；整数（含 0）= 该用户的专属上限，0 表示不限
+// 生效上限优先级：用户专属 > 生效中的订阅套餐 > 站点默认（settings.daily_chat_limit）
+
+db.exec(`
+-- 套餐（订阅计划）：管理员维护，用户端只读展示 + 申请
+CREATE TABLE IF NOT EXISTS plans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  price_cents INTEGER NOT NULL DEFAULT 0,
+  period_days INTEGER NOT NULL DEFAULT 30,
+  daily_chat_limit INTEGER NOT NULL DEFAULT 0,
+  credits INTEGER NOT NULL DEFAULT 0,
+  sort INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 用户订阅：pending（申请待审批）/ active / rejected / expired / canceled
+-- 套餐的额度与上限在下单时「快照」进本表：之后管理员改套餐不会追溯影响老订阅
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  plan_id INTEGER REFERENCES plans(id) ON DELETE SET NULL,
+  plan_name TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  price_cents INTEGER NOT NULL DEFAULT 0,
+  period_days INTEGER NOT NULL DEFAULT 30,
+  daily_chat_limit INTEGER NOT NULL DEFAULT 0,
+  credits INTEGER NOT NULL DEFAULT 0,
+  started_at TEXT,
+  expires_at TEXT,
+  note TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_subs_user ON subscriptions(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_subs_status ON subscriptions(status, id DESC);
+
+-- 每日打卡：每用户每自然日最多一条（北京自然日，容器 TZ=Asia/Shanghai）
+CREATE TABLE IF NOT EXISTS checkins (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  day TEXT NOT NULL,
+  reward INTEGER NOT NULL DEFAULT 0,
+  streak INTEGER NOT NULL DEFAULT 1,
+  ip TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_checkin_user_day ON checkins(user_id, day);
+CREATE INDEX IF NOT EXISTS idx_checkin_day ON checkins(day DESC);
+
+-- 额度流水：发放 / 扣减 / 调整，全部留痕（对账与申诉用）
+CREATE TABLE IF NOT EXISTS credit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  delta INTEGER NOT NULL,
+  balance_after INTEGER,
+  reason TEXT NOT NULL DEFAULT '',
+  detail TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_credit_user ON credit_log(user_id, id DESC);
+`);
+
+// 老库补列（幂等）：额度与专属每日上限
+const quotaUserCols = tableColumns('users');
+if (!quotaUserCols.includes('credits')) {
+  db.exec('ALTER TABLE users ADD COLUMN credits INTEGER');
+}
+if (!quotaUserCols.includes('daily_chat_limit')) {
+  db.exec('ALTER TABLE users ADD COLUMN daily_chat_limit INTEGER');
+}
+
+// 数字型站点设置的读取（空串/未设置 → 默认值）
+function numSetting(key, def = 0) {
+  const raw = getSetting(key);
+  if (raw === null || raw === undefined || String(raw).trim() === '') return def;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : def;
+}
+function boolSetting(key, def) {
+  const raw = getSetting(key);
+  if (raw === null || raw === undefined || String(raw).trim() === '') return def;
+  return String(raw) !== 'false';
+}
+
+// 今天的北京自然日（YYYY-MM-DD）；offsetDays 用于取昨天算连签
+export function localDay(offsetDays = 0) {
+  if (!offsetDays) return db.prepare("SELECT date('now','localtime') AS d").get().d;
+  const mod = `${offsetDays > 0 ? '+' : '-'}${Math.abs(offsetDays)} days`;
+  return db.prepare("SELECT date('now','localtime',?) AS d").get(mod).d;
+}
+
+// ---------- 签到人机校验 站点设置 ----------
+export function getCheckinSettings() {
+  const siteKey = (getSetting('turnstile_site_key') || '').trim();
+  const secretKey = (getSetting('turnstile_secret_key') || '').trim();
+  return {
+    enabled: boolSetting('checkin_enabled', true),
+    reward: Math.max(0, Math.floor(numSetting('checkin_reward', 3))),
+    streakBonus: Math.max(0, Math.floor(numSetting('checkin_streak_bonus', 2))),
+    streakBonusMax: Math.max(0, Math.floor(numSetting('checkin_streak_bonus_max', 10))),
+    // 只有 site key 与 secret 都配好才要求人机校验，避免「配一半」把用户挡在门外
+    captchaEnabled: Boolean(siteKey && secretKey),
+    siteKey,
+    secretKey,
+  };
+}
+
+// 某天签到的奖励：基础奖励 + 连签加成（带上限，避免无限滚雪球）
+export function checkinRewardFor(streak, s = getCheckinSettings()) {
+  return s.reward + Math.min(s.streakBonus * Math.max(0, streak - 1), s.streakBonusMax);
+}
+
+export function getCheckinOn(userId, day) {
+  return db.prepare('SELECT * FROM checkins WHERE user_id = ? AND day = ?').get(userId, day) || null;
+}
+
+export function listCheckins(userId, limit = 30) {
+  return db.prepare('SELECT day, reward, streak, created_at FROM checkins WHERE user_id = ? ORDER BY day DESC LIMIT ?')
+    .all(userId, Math.min(Math.max(Number(limit) || 30, 1), 200));
+}
+
+export function checkinSummary() {
+  const total = db.prepare('SELECT COUNT(*) AS n, COUNT(DISTINCT user_id) AS users FROM checkins').get();
+  const today = db.prepare("SELECT COUNT(*) AS n FROM checkins WHERE day = date('now','localtime')").get();
+  return { total: total.n, users: total.users, today: today.n, day: localDay() };
+}
+
+export function checkinDaily(days = 14) {
+  return db.prepare(`
+    SELECT day, COUNT(*) AS checkins, COUNT(DISTINCT user_id) AS users, COALESCE(SUM(reward),0) AS reward
+    FROM checkins
+    WHERE day >= date('now','localtime',?)
+    GROUP BY day ORDER BY day ASC`).all(`-${Number(days) - 1} days`);
+}
+
+// 当天签到状态（只读，供前端渲染按钮/连签天数）
+export function checkinStatus(userId) {
+  const s = getCheckinSettings();
+  const day = localDay();
+  const today = getCheckinOn(userId, day);
+  const y = getCheckinOn(userId, localDay(-1));
+  const last = db.prepare('SELECT day, streak FROM checkins WHERE user_id = ? ORDER BY day DESC LIMIT 1').get(userId) || null;
+  // 今天已签 → 今天的连签；今天未签但昨天签过 → 今天签到将是「昨天 + 1」
+  const streak = today ? Number(today.streak) : (y ? Number(y.streak) : 0);
+  const nextStreak = today ? Number(today.streak) : (y ? Number(y.streak) + 1 : 1);
+  return {
+    enabled: s.enabled,
+    day,
+    checked_in: Boolean(today),
+    streak,
+    next_streak: nextStreak,
+    reward_today: today ? today.reward : 0,
+    reward_next: checkinRewardFor(nextStreak, s),
+    last_day: last ? last.day : null,
+    captcha_enabled: s.captchaEnabled,
+    captcha_site_key: s.captchaEnabled ? s.siteKey : '',
+    history: listCheckins(userId, 30),
+  };
+}
+
+// 执行签到：同一自然日只能签一次（唯一索引兜底并发）
+export function doCheckin(userId, { ip = '' } = {}) {
+  const s = getCheckinSettings();
+  if (!s.enabled) return { ok: false, code: 'disabled' };
+  const day = localDay();
+  if (getCheckinOn(userId, day)) return { ok: false, code: 'already' };
+  const y = getCheckinOn(userId, localDay(-1));
+  const streak = y ? Number(y.streak) + 1 : 1;
+  const reward = checkinRewardFor(streak, s);
+  try {
+    db.prepare('INSERT INTO checkins (user_id, day, reward, streak, ip) VALUES (?,?,?,?,?)')
+      .run(userId, day, reward, streak, ip);
+  } catch (err) {
+    if (String(err).includes('UNIQUE')) return { ok: false, code: 'already' };
+    throw err;
+  }
+  // 只有额度制账号真正加分；不限次账号仅记录签到与连签天数
+  // （不能顺手把不限次账号改成额度制，那是悄悄降级）
+  const u = db.prepare('SELECT credits FROM users WHERE id = ?').get(userId);
+  const finite = u && u.credits != null;
+  let balance = u ? (u.credits == null ? null : Number(u.credits)) : null;
+  if (finite && reward > 0) balance = addCredits(userId, reward, 'checkin', `每日签到（连签 ${streak} 天）`);
+  return { ok: true, code: 'ok', day, streak, reward, credited: Boolean(finite), balance };
+}
+
+// ---------- 额度 ----------
+export function getUserCredits(userId) {
+  const row = db.prepare('SELECT credits FROM users WHERE id = ?').get(userId);
+  if (!row) return null;
+  return row.credits == null ? null : Number(row.credits);
+}
+
+// 发放/调整额度（reason: checkin | subscribe | admin | gift）
+export function addCredits(userId, delta, reason = 'admin', detail = '') {
+  const cur = getUserCredits(userId);
+  if (cur === null) {
+    db.prepare('INSERT INTO credit_log (user_id, delta, balance_after, reason, detail) VALUES (?,?,?,?,?)')
+      .run(userId, 0, null, reason, `${detail}（不限次账号，额度不生效）`.trim());
+    return null;
+  }
+  const next = Math.max(0, cur + Math.floor(delta));
+  db.prepare('UPDATE users SET credits = ? WHERE id = ?').run(next, userId);
+  db.prepare('INSERT INTO credit_log (user_id, delta, balance_after, reason, detail) VALUES (?,?,?,?,?)')
+    .run(userId, Math.floor(delta), next, reason, detail);
+  return next;
+}
+
+// 直接设定额度（管理员用）；value 传 null/'' 表示改为「不限次」
+export function setUserCredits(userId, value, reason = 'admin', detail = '') {
+  const cur = getUserCredits(userId);
+  const next = (value === null || value === undefined || value === '')
+    ? null
+    : Math.max(0, Math.floor(Number(value)));
+  if (next !== null && !Number.isFinite(next)) return cur;
+  db.prepare('UPDATE users SET credits = ? WHERE id = ?').run(next, userId);
+  const delta = next === null ? 0 : next - (cur ?? 0);
+  db.prepare('INSERT INTO credit_log (user_id, delta, balance_after, reason, detail) VALUES (?,?,?,?,?)')
+    .run(userId, delta, next, reason, detail || (next === null ? '改为不限次' : `管理员设定为 ${next} 次`));
+  return next;
+}
+
+export function setUserDailyLimit(userId, value) {
+  const next = (value === null || value === undefined || value === '')
+    ? null
+    : Math.max(0, Math.floor(Number(value)));
+  db.prepare('UPDATE users SET daily_chat_limit = ? WHERE id = ?').run(next, userId);
+  return next;
+}
+
+// 扣 1 次额度：返回剩余额度；不限次返回 null；不足返回 -1（调用方应已先拦截）
+export function consumeCredit(userId, detail = '') {
+  const cur = getUserCredits(userId);
+  if (cur === null) return null;
+  if (cur <= 0) return -1;
+  const next = cur - 1;
+  db.prepare('UPDATE users SET credits = ? WHERE id = ?').run(next, userId);
+  db.prepare('INSERT INTO credit_log (user_id, delta, balance_after, reason, detail) VALUES (?,?,?,?,?)')
+    .run(userId, -1, next, 'consume', detail);
+  return next;
+}
+
+export function listCreditLog(userId, limit = 50) {
+  return db.prepare('SELECT delta, balance_after, reason, detail, created_at FROM credit_log WHERE user_id = ? ORDER BY id DESC LIMIT ?')
+    .all(userId, Math.min(Math.max(Number(limit) || 50, 1), 200));
+}
+
+// 新用户开户额度：站点设置 default_credits 留空 = 不限次（沿用既有部署行为）；
+// 填了数字则新注册/新建的用户按额度制开工（额度用完靠签到或订阅补充）。
+export function applyDefaultCredits(userId) {
+  const raw = getSetting('default_credits');
+  if (raw === null || raw === undefined || String(raw).trim() === '') return null;
+  const n = Math.max(0, Math.floor(Number(raw) || 0));
+  return setUserCredits(userId, n, 'default', '新用户默认额度');
+}
+
+export function getDefaultCredits() {
+  const raw = getSetting('default_credits');
+  if (raw === null || raw === undefined || String(raw).trim() === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
+}
+
+// ---------- 订阅 ----------
+export function expireSubscriptions() {
+  const r = db.prepare(`UPDATE subscriptions SET status = 'expired', updated_at = datetime('now')
+    WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at <= datetime('now')`).run();
+  return r.changes || 0;
+}
+
+// 生效中的订阅（过期的不算，不依赖定时清理）
+export function activeSubscription(userId) {
+  return db.prepare(`SELECT * FROM subscriptions
+    WHERE user_id = ? AND status = 'active' AND (expires_at IS NULL OR expires_at > datetime('now'))
+    ORDER BY id DESC LIMIT 1`).get(userId) || null;
+}
+
+export function pendingSubscription(userId) {
+  return db.prepare("SELECT * FROM subscriptions WHERE user_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1")
+    .get(userId) || null;
+}
+
+export function listSubscriptions({ userId = null, status = null, limit = 200 } = {}) {
+  const where = [];
+  const args = [];
+  if (userId != null) { where.push('s.user_id = ?'); args.push(Number(userId)); }
+  if (status) { where.push('s.status = ?'); args.push(status); }
+  return db.prepare(`SELECT s.*, u.username FROM subscriptions s JOIN users u ON u.id = s.user_id
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY s.id DESC LIMIT ?`).all(...args, Math.min(Math.max(Number(limit) || 200, 1), 500));
+}
+
+export function subscriptionStats() {
+  const row = db.prepare(`SELECT
+      SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN status = 'active' AND (expires_at IS NULL OR expires_at > datetime('now')) THEN 1 ELSE 0 END) AS active
+    FROM subscriptions`).get();
+  return { pending: row.pending || 0, active: row.active || 0 };
+}
+
+// ---------- 套餐 ----------
+export function listPlans({ includeInactive = false } = {}) {
+  return db.prepare(`SELECT * FROM plans ${includeInactive ? '' : 'WHERE active = 1'} ORDER BY sort ASC, id ASC`).all();
+}
+
+export function getPlan(id) {
+  return db.prepare('SELECT * FROM plans WHERE id = ?').get(id) || null;
+}
+
+export function createPlan({ name, description = '', priceCents = 0, periodDays = 30, dailyChatLimit = 0, credits = 0, sort = 0, active = true }) {
+  const r = db.prepare(`INSERT INTO plans (name, description, price_cents, period_days, daily_chat_limit, credits, sort, active)
+    VALUES (?,?,?,?,?,?,?,?)`).run(
+    String(name).slice(0, 40), String(description).slice(0, 200),
+    Math.max(0, Math.floor(Number(priceCents) || 0)),
+    Math.min(Math.max(Math.floor(Number(periodDays) || 30), 1), 3650),
+    Math.max(0, Math.floor(Number(dailyChatLimit) || 0)),
+    Math.max(0, Math.floor(Number(credits) || 0)),
+    Math.floor(Number(sort) || 0),
+    active ? 1 : 0,
+  );
+  return getPlan(Number(r.lastInsertRowid));
+}
+
+export function updatePlan(id, patch = {}) {
+  const cur = getPlan(id);
+  if (!cur) return null;
+  const next = {
+    name: patch.name != null ? String(patch.name).slice(0, 40) : cur.name,
+    description: patch.description != null ? String(patch.description).slice(0, 200) : cur.description,
+    price_cents: patch.priceCents != null ? Math.max(0, Math.floor(Number(patch.priceCents) || 0)) : cur.price_cents,
+    period_days: patch.periodDays != null ? Math.min(Math.max(Math.floor(Number(patch.periodDays) || 30), 1), 3650) : cur.period_days,
+    daily_chat_limit: patch.dailyChatLimit != null ? Math.max(0, Math.floor(Number(patch.dailyChatLimit) || 0)) : cur.daily_chat_limit,
+    credits: patch.credits != null ? Math.max(0, Math.floor(Number(patch.credits) || 0)) : cur.credits,
+    sort: patch.sort != null ? Math.floor(Number(patch.sort) || 0) : cur.sort,
+    active: patch.active != null ? (patch.active ? 1 : 0) : cur.active,
+  };
+  db.prepare(`UPDATE plans SET name=?, description=?, price_cents=?, period_days=?, daily_chat_limit=?, credits=?, sort=?, active=? WHERE id=?`)
+    .run(next.name, next.description, next.price_cents, next.period_days, next.daily_chat_limit, next.credits, next.sort, next.active, id);
+  return getPlan(id);
+}
+
+export function deletePlan(id) {
+  db.prepare('DELETE FROM plans WHERE id = ?').run(id);
+}
+
+// ---------- 订阅流程 ----------
+export function applySubscription(userId, planId, note = '') {
+  const plan = getPlan(planId);
+  if (!plan || !plan.active) return { ok: false, code: 'no_plan' };
+  if (pendingSubscription(userId)) return { ok: false, code: 'pending_exists' };
+  const r = db.prepare(`INSERT INTO subscriptions
+      (user_id, plan_id, plan_name, status, price_cents, period_days, daily_chat_limit, credits, note)
+    VALUES (?,?,?,'pending',?,?,?,?,?)`).run(
+    userId, plan.id, plan.name, plan.price_cents, plan.period_days, plan.daily_chat_limit, plan.credits,
+    String(note || '').slice(0, 200),
+  );
+  return { ok: true, id: Number(r.lastInsertRowid), plan };
+}
+
+// 审批通过：置为生效、按「快照」的周期算到期时间，并发放套餐额度
+export function approveSubscription(id, actorName = '') {
+  const sub = db.prepare('SELECT * FROM subscriptions WHERE id = ?').get(id);
+  if (!sub) return { ok: false, code: 'not_found' };
+  if (sub.status === 'active') return { ok: false, code: 'already_active' };
+  // 已有生效订阅时从原到期时间续期，避免「买两次反而更短」
+  const cur = activeSubscription(sub.user_id);
+  const base = cur && cur.expires_at ? cur.expires_at : null;
+  const expiresRow = base
+    ? db.prepare("SELECT datetime(?, ?) AS e").get(base, `+${sub.period_days} days`)
+    : db.prepare("SELECT datetime('now', ?) AS e").get(`+${sub.period_days} days`);
+  const note = [sub.note, actorName ? `审批：${actorName}` : ''].filter(Boolean).join(' · ');
+  // 先撤掉旧的生效订阅，保证同一用户只有一条 active
+  if (cur) db.prepare("UPDATE subscriptions SET status='canceled', updated_at = datetime('now') WHERE id = ?").run(cur.id);
+  db.prepare(`UPDATE subscriptions SET status='active', started_at = COALESCE(started_at, datetime('now')),
+      expires_at = ?, updated_at = datetime('now'), note = ? WHERE id = ?`).run(expiresRow.e, note, id);
+  let balance = getUserCredits(sub.user_id);
+  if (sub.credits > 0) {
+    balance = addCredits(sub.user_id, sub.credits, 'subscribe', `套餐「${sub.plan_name}」发放 ${sub.credits} 次`);
+  }
+  return { ok: true, expires_at: expiresRow.e, credits: balance };
+}
+
+export function rejectSubscription(id, reason = '') {
+  const sub = db.prepare('SELECT * FROM subscriptions WHERE id = ?').get(id);
+  if (!sub) return { ok: false, code: 'not_found' };
+  if (sub.status !== 'pending') return { ok: false, code: 'not_pending' };
+  db.prepare("UPDATE subscriptions SET status='rejected', updated_at = datetime('now'), note=? WHERE id=?")
+    .run(String(reason || '').slice(0, 200), id);
+  return { ok: true };
+}
+
+export function cancelSubscriptionById(id) {
+  db.prepare("UPDATE subscriptions SET status='canceled', updated_at = datetime('now') WHERE id = ?").run(id);
+}
+
+// 生效上限与剩余额度：chat 路由与用户面板共用同一套判定，避免两处逻辑漂移
+export function resolveQuota(userId) {
+  const u = db.prepare('SELECT credits, daily_chat_limit FROM users WHERE id = ?').get(userId) || {};
+  const sub = activeSubscription(userId);
+  const siteLimit = numSetting('daily_chat_limit', 0);
+  const userLimit = (u.daily_chat_limit === null || u.daily_chat_limit === undefined) ? null : Number(u.daily_chat_limit);
+  const planLimit = sub ? Number(sub.daily_chat_limit || 0) : 0;
+  const dailyLimit = userLimit !== null ? userLimit : (planLimit > 0 ? planLimit : siteLimit);
+  const credits = (u.credits === null || u.credits === undefined) ? null : Number(u.credits);
+  return {
+    credits,
+    unlimited: credits === null,
+    daily_limit: dailyLimit,
+    daily_limit_source: userLimit !== null ? 'user' : (planLimit > 0 ? 'plan' : 'site'),
+    used_today: usageCountToday(userId),
+    site_limit: siteLimit,
+    plan_limit: planLimit,
+    user_limit: userLimit,
+    subscription: sub ? {
+      id: sub.id, plan_id: sub.plan_id, plan_name: sub.plan_name,
+      started_at: sub.started_at, expires_at: sub.expires_at,
+      daily_chat_limit: sub.daily_chat_limit, credits: sub.credits,
+    } : null,
+  };
 }
