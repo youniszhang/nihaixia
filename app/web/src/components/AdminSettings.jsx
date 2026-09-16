@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
+import Icon from './Icon.jsx';
 
 export default function AdminSettings({ onClose }) {
   const [cfg, setCfg] = useState({
@@ -13,11 +14,15 @@ export default function AdminSettings({ onClose }) {
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [dsStatus, setDsStatus] = useState('');   // 网页版登录状态文案
+  const [dsOk, setDsOk] = useState(null);         // 状态语义：true 成功 / false 失败 / null 中性
   const [hasToken, setHasToken] = useState(false); // 服务器直连模式：是否已保存登录凭证
   const [dsBusy, setDsBusy] = useState(false);
   const [showTokenBox, setShowTokenBox] = useState(false); // 服务器模式：粘贴登录凭证
   const [tokenInput, setTokenInput] = useState('');
   const isTauri = typeof window !== 'undefined' && !!window.__TAURI__;
+
+  // 统一设置状态文案与语义（图标由渲染层决定，文案本身不再带符号）
+  function setDs(text, ok = null) { setDsStatus(text); setDsOk(ok); }
 
   useEffect(() => {
     api.getLlmConfig().then((d) => {
@@ -61,34 +66,35 @@ export default function AdminSettings({ onClose }) {
   }
 
   async function openLogin() {
-    setDsBusy(true); setDsStatus(''); setErr('');
+    setDsBusy(true); setDs(''); setErr('');
     try {
       // 先保存端口等设置，再用它打开登录窗口
       await api.saveLlmConfig({ provider: cfg.provider, dsweb_port: Number(cfg.dsweb_port) || 9223, dsweb_expert: !!cfg.dsweb_expert });
       await api.openDswebLogin();
-      setDsStatus('已打开专用浏览器窗口：请在其中登录 chat.deepseek.com（登录一次即可，之后长期有效）。');
+      setDs('已打开专用浏览器窗口：请在其中登录 chat.deepseek.com（登录一次即可，之后长期有效）。');
     } catch (e2) {
       setErr('打开浏览器失败：' + (e2.message || ''));
     } finally { setDsBusy(false); }
   }
 
   async function checkLogin() {
-    setDsBusy(true); setDsStatus(''); setErr('');
+    setDsBusy(true); setDs(''); setErr('');
     try {
       const r = await api.checkDswebLogin();
       setHasToken(Boolean(r.mode === 'direct' && r.loggedIn));
-      setDsStatus(r.loggedIn
-        ? `✅ 网页版已登录（${r.mode === 'direct' ? '直连通道' : '浏览器通道'}${r.email ? ' · ' + r.email : ''}），0 Token 问诊可用。`
-        : `⚠️ 未检测到登录${r.reason ? '：' + r.reason : ''}。${r.mode === 'direct' ? '请重新粘贴登录凭证。' : '请点击「打开浏览器登录」完成登录后重试。'}`);
+      setDs(r.loggedIn
+        ? `网页版已登录（${r.mode === 'direct' ? '直连通道' : '浏览器通道'}${r.email ? ' · ' + r.email : ''}），0 Token 问诊可用。`
+        : `未检测到登录${r.reason ? '：' + r.reason : ''}。${r.mode === 'direct' ? '请重新粘贴登录凭证。' : '请点击「打开浏览器登录」完成登录后重试。'}`,
+      Boolean(r.loggedIn));
     } catch (e2) {
-      setDsStatus('检测失败：' + (e2.message || ''));
+      setDs('检测失败：' + (e2.message || ''), false);
     } finally { setDsBusy(false); }
   }
 
   async function killBrowser() {
     setDsBusy(true);
-    try { await api.killDswebBrowser(); setDsStatus('已关闭专用浏览器。'); }
-    catch (e2) { setDsStatus('操作失败：' + (e2.message || '')); }
+    try { await api.killDswebBrowser(); setDs('已关闭专用浏览器。'); }
+    catch (e2) { setDs('操作失败：' + (e2.message || ''), false); }
     finally { setDsBusy(false); }
   }
 
@@ -98,7 +104,7 @@ export default function AdminSettings({ onClose }) {
     try {
       await api.clearDsToken();
       setHasToken(false);
-      setDsStatus('已清除登录凭证。');
+      setDs('已清除登录凭证。');
     } catch (e2) {
       setErr('清除失败：' + (e2.message || e2));
     } finally { setDsBusy(false); }
@@ -108,16 +114,16 @@ export default function AdminSettings({ onClose }) {
   async function submitToken() {
     const t = tokenInput.trim();
     if (!t) return;
-    setDsBusy(true); setDsStatus(''); setErr('');
+    setDsBusy(true); setDs(''); setErr('');
     try {
       const r = await api.injectDsToken(t);
       if (r.loggedIn) {
         setHasToken(true);
-        setDsStatus(`✅ 登录成功（直连通道${r.email ? ' · ' + r.email : ''}）！0 Token 问诊已可用。`);
+        setDs(`登录成功（直连通道${r.email ? ' · ' + r.email : ''}）！0 Token 问诊已可用。`, true);
         setTokenInput('');
         setShowTokenBox(false);
       } else {
-        setDsStatus('⚠️ 凭证已写入，但未检测到登录态（可能已过期或复制不完整）。请重新获取后重试。');
+        setDs('凭证已写入，但未检测到登录态（可能已过期或复制不完整）。请重新获取后重试。', false);
       }
     } catch (e2) {
       setErr('登录失败：' + (e2.message || e2));
@@ -130,7 +136,7 @@ export default function AdminSettings({ onClose }) {
   async function inAppLogin() {
     const t = window.__TAURI__;
     if (!t?.event?.emit) { setErr('应用内登录仅桌面版可用'); return; }
-    setDsBusy(true); setDsStatus(''); setErr('');
+    setDsBusy(true); setDs(''); setErr('');
     try {
       await api.saveLlmConfig({
         provider: 'dsweb',
@@ -139,20 +145,20 @@ export default function AdminSettings({ onClose }) {
       });
       await api.startInAppLogin();
       await t.event.emit('ds-login-open', {});
-      setDsStatus('已在应用内打开登录窗口，请完成登录（支持扫码/账号）。成功后自动生效…');
+      setDs('已在应用内打开登录窗口，请完成登录（支持扫码/账号）。成功后自动生效…');
       for (let i = 0; i < 130; i++) {
         await new Promise((r) => setTimeout(r, 2000));
         const st = await api.inAppLoginStatus();
         if (st.state === 'success') {
-          setDsStatus('✅ 登录成功！专用浏览器已就绪，0 Token 问诊可用。');
+          setDs('登录成功！专用浏览器已就绪，0 Token 问诊可用。', true);
           return;
         }
         if (st.state === 'failed') {
-          setDsStatus('⚠️ 登录未生效（校验失败），请重试一次。');
+          setDs('登录未生效（校验失败），请重试一次。', false);
           return;
         }
         if (st.state === 'timeout') {
-          setDsStatus('等待登录超时（4 分钟）。请重试，或用「打开浏览器登录」。');
+          setDs('等待登录超时（4 分钟）。请重试，或用「打开浏览器登录」。', false);
           return;
         }
       }
@@ -232,19 +238,19 @@ export default function AdminSettings({ onClose }) {
           <div className="dsweb-actions">
             {isTauri ? (
               <>
-                <button type="button" className="btn-primary dsweb-primary" onClick={inAppLogin} disabled={dsBusy}>🔑 应用内登录（推荐）</button>
-                <button type="button" className="btn-ghost" onClick={openLogin} disabled={dsBusy}>🌐 打开浏览器登录</button>
+                <button type="button" className="btn-primary dsweb-primary" onClick={inAppLogin} disabled={dsBusy}><Icon name="key" size={15} /> 应用内登录（推荐）</button>
+                <button type="button" className="btn-ghost" onClick={openLogin} disabled={dsBusy}><Icon name="link" size={15} /> 打开浏览器登录</button>
               </>
             ) : (
               <button type="button" className={`${hasToken ? 'btn-ghost' : 'btn-primary dsweb-primary'}`} onClick={() => setShowTokenBox((v) => !v)} disabled={dsBusy}>
-                {hasToken ? '🔐 登录凭证已配置（点击更换）' : '🔐 粘贴登录凭证'}
+                <Icon name="shield" size={15} /> {hasToken ? '登录凭证已配置（点击更换）' : '粘贴登录凭证'}
               </button>
             )}
             {!isTauri && hasToken && (
-              <button type="button" className="btn-ghost" onClick={clearToken} disabled={dsBusy}>✕ 清除凭证</button>
+              <button type="button" className="btn-ghost" onClick={clearToken} disabled={dsBusy}><Icon name="close" size={15} /> 清除凭证</button>
             )}
-            <button type="button" className="btn-ghost" onClick={checkLogin} disabled={dsBusy}>🔍 检测登录状态</button>
-            <button type="button" className="btn-ghost" onClick={killBrowser} disabled={dsBusy}>✕ 关闭专用浏览器</button>
+            <button type="button" className="btn-ghost" onClick={checkLogin} disabled={dsBusy}><Icon name="search" size={15} /> 检测登录状态</button>
+            <button type="button" className="btn-ghost" onClick={killBrowser} disabled={dsBusy}><Icon name="close" size={15} /> 关闭专用浏览器</button>
           </div>
 
           {!isTauri && showTokenBox && (
@@ -273,7 +279,11 @@ export default function AdminSettings({ onClose }) {
               </div>
             </div>
           )}
-          {dsStatus && <p className="sheet-msg">{dsStatus}</p>}
+          {dsStatus && (
+            <p className={`dsweb-status ${dsOk === true ? 'ok' : dsOk === false ? 'warn' : ''}`}>
+              {dsOk !== null && <Icon name={dsOk ? 'check' : 'alert'} size={14} />} {dsStatus}
+            </p>
+          )}
         </>
       )}
 

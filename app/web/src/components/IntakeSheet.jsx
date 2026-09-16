@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Icon from './Icon.jsx';
 
 const TEN_ASK = [
   { key: 'chill_fever', label: '寒热', desc: '怕冷？发热？怕冷重还是发热重？有无寒热往来？', type: 'textarea' },
@@ -127,7 +128,7 @@ export default function IntakeSheet({ onApply, onClose }) {
             onApply(generateSummary());
           }}
         >
-          ✅ 确认并问诊
+          <Icon name="stethoscope" size={16} /> 确认并问诊
         </button>
       </div>
     </div>

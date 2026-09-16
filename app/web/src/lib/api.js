@@ -45,6 +45,15 @@ export const api = {
   getProfile: () => request('/api/profile'),
   saveProfile: (p) => request('/api/profile', { method: 'PUT', body: p }),
 
+  // 每日签到 / 额度账户
+  checkin: () => request('/api/checkin'),
+  doCheckin: (cfToken = '') => request('/api/checkin', { method: 'POST', body: { cf_token: cfToken } }),
+
+  // 订阅（套餐查看与申请）
+  subscriptions: () => request('/api/subscription'),
+  applySubscription: (planId, note = '') => request('/api/subscription/apply', { method: 'POST', body: { plan_id: planId, note } }),
+  cancelSubscriptionRequest: () => request('/api/subscription/cancel', { method: 'POST' }),
+
   // admin
   getLlmConfig: () => request('/api/admin/llm'),
   saveLlmConfig: (p) => request('/api/admin/llm', { method: 'PUT', body: p }),
@@ -82,6 +91,25 @@ export const api = {
   adminGetSite: () => request('/api/admin/site'),
   adminSaveSite: (patch) => request('/api/admin/site', { method: 'PUT', body: patch }),
   adminAudit: (limit = 100) => request(`/api/admin/audit?limit=${limit}`),
+
+  // 管理后台：套餐 / 订阅 / 签到报表 / 单用户额度明细
+  adminPlans: () => request('/api/admin/plans'),
+  adminCreatePlan: (plan) => request('/api/admin/plans', { method: 'POST', body: plan }),
+  adminUpdatePlan: (id, patch) => request(`/api/admin/plans/${id}`, { method: 'PATCH', body: patch }),
+  adminDeletePlan: (id) => request(`/api/admin/plans/${id}`, { method: 'DELETE' }),
+  adminSubscriptions: ({ status, userId, limit = 200 } = {}) => {
+    const p = new URLSearchParams();
+    if (status) p.set('status', status);
+    if (userId) p.set('user_id', String(userId));
+    p.set('limit', String(limit));
+    return request(`/api/admin/subscriptions?${p.toString()}`);
+  },
+  adminApproveSubscription: (id) => request(`/api/admin/subscriptions/${id}/approve`, { method: 'POST' }),
+  adminRejectSubscription: (id, reason = '') => request(`/api/admin/subscriptions/${id}/reject`, { method: 'POST', body: { reason } }),
+  adminCancelSubscription: (id) => request(`/api/admin/subscriptions/${id}/cancel`, { method: 'POST' }),
+  adminGrantSubscription: (userId, planId, note = '') => request(`/api/admin/users/${userId}/subscribe`, { method: 'POST', body: { plan_id: planId, note } }),
+  adminUserQuota: (id) => request(`/api/admin/users/${id}/quota`),
+  adminCheckins: (days = 14) => request(`/api/admin/checkins?days=${days}`),
 
   // sessions
   listSessions: () => request('/api/sessions'),

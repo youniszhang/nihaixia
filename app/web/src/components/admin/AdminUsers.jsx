@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../../lib/api.js';
+import Icon from '../Icon.jsx';
 
 function fmtTime(t) {
   return t ? t.replace('T', ' ').slice(0, 16) : '—';
@@ -8,8 +9,9 @@ function csvEscape(v) {
   const s = String(v ?? '');
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
+const creditsText = (c) => (c === null || c === undefined ? '不限' : `${c} 次`);
 
-export default function AdminUsers({ onViewConversations }) {
+export default function AdminUsers({ onViewConversations, onGrantSubscription }) {
   const [users, setUsers] = useState([]);
   const [adminSource, setAdminSource] = useState('env');
   const [err, setErr] = useState('');
@@ -26,6 +28,7 @@ export default function AdminUsers({ onViewConversations }) {
   const [form, setForm] = useState({ username: '', password: '', note: '' });
   const [pwFor, setPwFor] = useState(null);
   const [pwValue, setPwValue] = useState('');
+  const [quotaFor, setQuotaFor] = useState(null);   // 额度弹窗对象
   const [confirmAsk, setConfirmAsk] = useState(null); // { title, body, danger, onOk }
 
   async function load() {
@@ -46,7 +49,8 @@ export default function AdminUsers({ onViewConversations }) {
       if (statusFilter === 'active' && u.status === 'disabled') return false;
       if (statusFilter === 'disabled' && u.status !== 'disabled') return false;
       if (statusFilter === 'admin' && !u.is_admin) return false;
-      if (kw && !`${u.username} ${u.note || ''}`.toLowerCase().includes(kw)) return false;
+      if (statusFilter === 'quota' && (u.credits === null || u.credits === undefined)) return false;
+      if (kw && !`${u.username} ${u.note || ''} ${u.plan_name || ''}`.toLowerCase().includes(kw)) return false;
       return true;
     });
   }, [users, keyword, statusFilter]);
@@ -128,7 +132,7 @@ export default function AdminUsers({ onViewConversations }) {
       title: '删除账号',
       danger: true,
       okText: '永久删除',
-      body: `确定删除「${u.username}」？\n\n该操作会一并删除：\n• ${u.session_count} 个问诊会话及其全部对话记录\n• 体质档案、用量记录\n\n此操作不可恢复！`,
+      body: `确定删除「${u.username}」？\n\n该操作会一并删除：\n• ${u.session_count} 个问诊会话及其全部对话记录\n• 体质档案、用量与额度记录、签到记录\n\n此操作不可恢复！`,
       onOk: async () => {
         try {
           await api.adminDeleteUser(u.id);
@@ -158,7 +162,7 @@ export default function AdminUsers({ onViewConversations }) {
     const names = users.filter((u) => ids.includes(u.id)).map((u) => u.username);
     const label = { disable: '禁用', enable: '启用', delete: '删除' }[action];
     const extra = action === 'delete'
-      ? `\n\n⚠️ 将永久删除这些账号及其全部问诊记录（共 ${users.filter((u) => ids.includes(u.id)).reduce((n, u) => n + u.session_count, 0)} 个会话），不可恢复！`
+      ? `\n\n将永久删除这些账号及其全部问诊记录（共 ${users.filter((u) => ids.includes(u.id)).reduce((n, u) => n + u.session_count, 0)} 个会话），不可恢复！`
       : action === 'disable' ? '\n\n禁用后这些用户立即无法登录。' : '';
     setConfirmAsk({
       title: `批量${label}（${ids.length} 个账号）`,
@@ -178,10 +182,13 @@ export default function AdminUsers({ onViewConversations }) {
 
   function exportCsv() {
     const rows = [
-      ['ID', '用户名', '状态', '管理员', '问诊数', '提问数', '调用数', '注册时间', '最近登录', '备注'],
+      ['ID', '用户名', '状态', '管理员', '剩余额度', '每日上限', '订阅套餐', '订阅到期', '签到天数', '问诊数', '提问数', '调用数', '注册时间', '最近登录', '备注'],
       ...filtered.map((u) => [
         u.id, u.username, u.status === 'disabled' ? '已禁用' : '正常',
-        u.is_admin ? '是' : '否', u.session_count, u.question_count, u.call_count,
+        u.is_admin ? '是' : '否', creditsText(u.credits),
+        u.daily_chat_limit == null ? '跟随套餐/站点' : u.daily_chat_limit,
+        u.plan_name || '', u.plan_expires_at || '', u.checkin_count ?? 0,
+        u.session_count, u.question_count, u.call_count,
         u.created_at, u.last_login_at || '', u.note || '',
       ]),
     ];
@@ -204,19 +211,24 @@ export default function AdminUsers({ onViewConversations }) {
             className="admin-input"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
-            placeholder="搜索用户名或备注"
+            placeholder="搜索用户名 / 备注 / 套餐"
           />
           <select className="admin-input admin-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
             <option value="all">全部状态</option>
             <option value="active">仅正常</option>
             <option value="disabled">仅禁用</option>
             <option value="admin">仅管理员</option>
+            <option value="quota">仅额度制</option>
           </select>
           <span className="admin-count">{filtered.length} / {users.length} 位用户</span>
         </div>
         <div className="admin-filter">
-          <button className="btn-ghost" onClick={exportCsv} title="导出当前筛选结果为 CSV">⬇ 导出 CSV</button>
-          <button className="btn-primary" onClick={openCreate}>＋ 新建用户</button>
+          <button className="btn-ghost" onClick={exportCsv} title="导出当前筛选结果为 CSV">
+            <Icon name="download" size={15} /> 导出 CSV
+          </button>
+          <button className="btn-primary" onClick={openCreate}>
+            <Icon name="plus" size={15} /> 新建用户
+          </button>
         </div>
       </div>
 
@@ -234,7 +246,7 @@ export default function AdminUsers({ onViewConversations }) {
       {err && <p className="auth-error">{err}</p>}
       {adminSource === 'legacy' && (
         <p className="admin-hint">
-          提示：当前未在配置文件指定管理员，沿用老规则（第一个注册的用户为管理员）。
+          <Icon name="info" size={14} /> 当前未在配置文件指定管理员，沿用老规则（第一个注册的用户为管理员）。
           建议在服务器 <code>.env</code> 中设置 <code>ADMIN_USERNAME=你的用户名</code> 并重启，管理员身份将以配置为准。
         </p>
       )}
@@ -253,9 +265,11 @@ export default function AdminUsers({ onViewConversations }) {
             </th>
             <th>用户名</th>
             <th>状态</th>
+            <th>额度</th>
+            <th>订阅</th>
+            <th>签到</th>
             <th>问诊</th>
             <th>提问数</th>
-            <th>调用数</th>
             <th>注册时间</th>
             <th>最近登录</th>
             <th>备注</th>
@@ -274,19 +288,31 @@ export default function AdminUsers({ onViewConversations }) {
                 <strong>{u.username}</strong>
                 {u.is_admin && <span className="badge badge-admin">管理员</span>}
                 {u.is_self && <span className="badge badge-self">当前账号</span>}
+                {u.pending_subs > 0 && <span className="badge badge-warn">待审批</span>}
               </td>
               <td>
                 <span className={`badge ${u.status === 'disabled' ? 'badge-off' : 'badge-on'}`}>
                   {u.status === 'disabled' ? '已禁用' : '正常'}
                 </span>
               </td>
+              <td className="td-amount">
+                <span className={u.credits != null && u.credits <= 3 ? 'qty-down' : ''}>{creditsText(u.credits)}</span>
+                {u.daily_chat_limit != null && <div className="td-dim td-note">每日 {u.daily_chat_limit || '不限'}</div>}
+              </td>
+              <td>
+                {u.plan_name
+                  ? <><span className="badge badge-plan">{u.plan_name}</span><div className="td-dim td-note">{fmtTime(u.plan_expires_at)}</div></>
+                  : <span className="td-dim">—</span>}
+              </td>
+              <td className="td-dim">{u.checkin_count ?? 0} 天</td>
               <td>{u.session_count}</td>
               <td>{u.question_count}</td>
-              <td>{u.call_count}</td>
               <td className="td-dim">{fmtTime(u.created_at)}</td>
               <td className="td-dim">{fmtTime(u.last_login_at)}</td>
               <td className="td-dim td-note" title={u.note || ''}>{u.note || '—'}</td>
               <td className="td-actions">
+                <button className="link-btn" onClick={() => setQuotaFor(u)} disabled={u.is_admin}>额度</button>
+                <button className="link-btn" onClick={() => onGrantSubscription(u)} disabled={u.is_admin}>订阅</button>
                 <button className="link-btn" onClick={() => onViewConversations(u)}>对话</button>
                 <button className="link-btn" onClick={() => openEdit(u)} disabled={u.is_admin}>编辑</button>
                 <button className="link-btn" onClick={() => { setPwFor(u); setPwValue(''); }} disabled={u.is_admin}>改密</button>
@@ -297,7 +323,7 @@ export default function AdminUsers({ onViewConversations }) {
               </td>
             </tr>
           ))}
-          {filtered.length === 0 && <tr><td colSpan={10} className="td-empty">{users.length ? '没有匹配的用户' : '暂无用户'}</td></tr>}
+          {filtered.length === 0 && <tr><td colSpan={12} className="td-empty">{users.length ? '没有匹配的用户' : '暂无用户'}</td></tr>}
         </tbody>
       </table>
 
@@ -364,6 +390,11 @@ export default function AdminUsers({ onViewConversations }) {
         </div>
       )}
 
+      {/* 额度与订阅明细 */}
+      {quotaFor && (
+        <QuotaModal user={quotaFor} onClose={() => setQuotaFor(null)} onSaved={load} />
+      )}
+
       {/* 通用确认（删除/禁用/批量） */}
       {confirmAsk && (
         <div className="admin-modal-mask" onClick={() => setConfirmAsk(null)}>
@@ -383,6 +414,141 @@ export default function AdminUsers({ onViewConversations }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// 单个用户的额度/上限调整 + 订阅与流水明细
+function QuotaModal({ user, onClose, onSaved }) {
+  const [detail, setDetail] = useState(null);
+  const [creditsInput, setCreditsInput] = useState('');
+  const [limitInput, setLimitInput] = useState('');
+  const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const d = await api.adminUserQuota(user.id);
+      setDetail(d);
+      setCreditsInput(d.quota.unlimited ? '' : String(d.quota.credits));
+      setLimitInput(d.quota.user_limit == null ? '' : String(d.quota.user_limit));
+    } catch (e) { setErr(e.message); }
+  }, [user.id]);
+  useEffect(() => { load(); }, [load]);
+
+  function flash(t) { setMsg(t); setTimeout(() => setMsg(''), 3000); }
+
+  async function patch(body, okText) {
+    setBusy(true); setErr('');
+    try {
+      const r = await api.adminUpdateUser(user.id, body);
+      flash(okText || (r.changes || []).join('；'));
+      await load();
+      await onSaved?.();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  }
+
+  const q = detail?.quota;
+
+  return (
+    <div className="admin-modal-mask" onClick={onClose}>
+      <div className="admin-modal admin-modal-wide" onClick={(e) => e.stopPropagation()}>
+        <h3><Icon name="coins" size={17} /> 额度与订阅 · {user.username}</h3>
+
+        {!detail ? (err ? <p className="auth-error">{err}</p> : <p className="admin-loading">加载中…</p>) : (
+          <>
+            <div className="quota-summary">
+              <div><span>剩余额度</span><strong>{q.unlimited ? '不限次' : `${q.credits} 次`}</strong></div>
+              <div><span>今日已用</span><strong>{q.used_today}{q.daily_limit > 0 ? ` / ${q.daily_limit}` : ' / 不限'}</strong></div>
+              <div><span>生效套餐</span><strong>{q.subscription ? q.subscription.plan_name : '无'}</strong></div>
+              <div><span>签到天数</span><strong>{detail.checkins?.length || 0} 天</strong></div>
+            </div>
+
+            <div className="field-row">
+              <label className="field">
+                <span>剩余额度（留空 = 不限次）</span>
+                <input
+                  type="number" min="0" step="1"
+                  value={creditsInput}
+                  placeholder="留空 = 不限次"
+                  onChange={(e) => setCreditsInput(e.target.value)}
+                  disabled={busy}
+                />
+              </label>
+              <label className="field">
+                <span>专属每日上限（留空 = 跟随套餐/站点）</span>
+                <input
+                  type="number" min="0" step="1"
+                  value={limitInput}
+                  placeholder="跟随套餐 / 站点"
+                  onChange={(e) => setLimitInput(e.target.value)}
+                  disabled={busy}
+                />
+              </label>
+            </div>
+            <div className="quota-actions">
+              <button
+                className="btn-primary" disabled={busy}
+                onClick={() => patch({ credits: creditsInput.trim() === '' ? null : Number(creditsInput), daily_chat_limit: limitInput.trim() === '' ? null : Number(limitInput) }, '已保存')}
+              >
+                保存
+              </button>
+              {!q.unlimited && (
+                <>
+                  <button className="btn-ghost" disabled={busy} onClick={() => patch({ credit_delta: 10 }, '已增加 10 次')}>
+                    <Icon name="plus" size={14} /> 10 次
+                  </button>
+                  <button className="btn-ghost" disabled={busy} onClick={() => patch({ credit_delta: 50 }, '已增加 50 次')}>
+                    <Icon name="plus" size={14} /> 50 次
+                  </button>
+                  <button className="btn-ghost" disabled={busy} onClick={() => patch({ credit_delta: -10 }, '已扣减 10 次')}>
+                    <Icon name="minus" size={14} /> 10 次
+                  </button>
+                </>
+              )}
+            </div>
+
+            <h4 className="modal-sub">额度流水</h4>
+            <table className="admin-table admin-table-compact">
+              <thead><tr><th>时间</th><th>变动</th><th>余额</th><th>说明</th></tr></thead>
+              <tbody>
+                {(detail.ledger || []).slice(0, 8).map((l, i) => (
+                  <tr key={i}>
+                    <td className="td-dim">{l.created_at}</td>
+                    <td className={l.delta > 0 ? 'qty-up' : l.delta < 0 ? 'qty-down' : 'td-dim'}>{l.delta > 0 ? `+${l.delta}` : l.delta}</td>
+                    <td>{l.balance_after == null ? '不限' : l.balance_after}</td>
+                    <td className="td-dim">{l.detail || l.reason}</td>
+                  </tr>
+                ))}
+                {(detail.ledger || []).length === 0 && <tr><td colSpan={4} className="td-empty">暂无记录</td></tr>}
+              </tbody>
+            </table>
+
+            <h4 className="modal-sub">订阅记录</h4>
+            <table className="admin-table admin-table-compact">
+              <thead><tr><th>套餐</th><th>状态</th><th>到期</th></tr></thead>
+              <tbody>
+                {(detail.subscriptions || []).slice(0, 5).map((s) => (
+                  <tr key={s.id}>
+                    <td>{s.plan_name}</td>
+                    <td>{{ pending: '待审批', active: '生效中', rejected: '已驳回', expired: '已过期', canceled: '已撤销' }[s.status] || s.status}</td>
+                    <td className="td-dim">{s.expires_at || '—'}</td>
+                  </tr>
+                ))}
+                {(detail.subscriptions || []).length === 0 && <tr><td colSpan={3} className="td-empty">暂无订阅</td></tr>}
+              </tbody>
+            </table>
+          </>
+        )}
+
+        <div className="sheet-actions">
+          <button type="button" className="btn-ghost" onClick={onClose}>关闭</button>
+        </div>
+        {msg && <p className="sheet-msg">{msg}</p>}
+        {err && <p className="auth-error">{err}</p>}
+      </div>
     </div>
   );
 }

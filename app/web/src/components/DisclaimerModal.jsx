@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Icon from './Icon.jsx';
 
 export default function DisclaimerModal({ onAccept }) {
   const [agreed, setAgreed] = useState(false);
@@ -7,7 +8,7 @@ export default function DisclaimerModal({ onAccept }) {
     <div className="overlay disclaimer-overlay">
       <div className="sheet disclaimer-sheet">
         <div className="disclaimer-body">
-          <div className="disclaimer-icon">⚠️</div>
+          <div className="disclaimer-icon"><Icon name="alert" size={36} strokeWidth={1.6} /></div>
           <h2>使用须知</h2>
           <ul className="disclaimer-list">
             <li>本应用由 <strong>AI 生成</strong>内容，角色设定为倪海厦学术视角，仅供<strong>中医学习与学术研究</strong>。</li>

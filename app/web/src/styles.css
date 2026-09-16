@@ -1404,6 +1404,21 @@ body {
   font-size: 0.82rem;
 }
 
+/* 网页版登录状态行：语义色 + 前置 SVG 状态图标 */
+.dsweb-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  margin-bottom: 12px;
+  color: var(--text-dim);
+}
+
+.dsweb-status.ok { color: var(--jade); }
+.dsweb-status.warn { color: var(--amber); }
+.dsweb-status svg { flex: none; margin-top: 3px; }
+
 /* ===== iPhone 刘海/底部安全区（PWA standalone）===== */
 @supports (padding: env(safe-area-inset-top)) {
   .main-header {
@@ -1491,6 +1506,9 @@ body {
 .disclaimer-icon {
   font-size: 2.4rem;
   margin-bottom: 8px;
+  color: var(--amber);
+  display: flex;
+  justify-content: center;
 }
 
 .disclaimer-body h2 {
@@ -1915,6 +1933,7 @@ body {
   border-radius: var(--radius-full);
   margin-left: 6px;
   vertical-align: middle;
+  white-space: nowrap;
 }
 
 .badge-admin {
@@ -2508,4 +2527,562 @@ body {
   padding: 1px 5px;
   font-size: 0.74rem;
   font-family: var(--mono);
+}
+
+/* ===== 会员 / 额度 / 签到（用户端面板 + 侧边栏徽标 + 管理端套餐页）===== */
+
+/* ---- 侧边栏：我的额度入口 ---- */
+.quota-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quota-link .quota-chip {
+  margin-left: auto;
+}
+
+.quota-chip {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: rgba(201, 168, 76, 0.18);
+  color: var(--gold);
+  white-space: nowrap;
+}
+
+.side-quota-hint {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.4);
+  padding: 0 12px 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.side-quota-hint .quota-dot {
+  font-size: 0.65rem;
+  color: var(--amber-light);
+  border: 1px solid rgba(212, 160, 23, 0.4);
+  border-radius: var(--radius-full);
+  padding: 0 6px;
+}
+
+.session-icon {
+  flex: none;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* ---- 顶栏额度徽标 ---- */
+.quota-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  margin-right: 8px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg-card);
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.quota-badge:hover {
+  border-color: var(--gold);
+  color: var(--text);
+}
+
+.quota-badge.low {
+  border-color: rgba(176, 58, 46, 0.4);
+  color: var(--red);
+}
+
+/* ---- 额度面板容器 ---- */
+.membership {
+  padding: 16px 20px 20px;
+}
+
+.mb-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.mb-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mb-card-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  color: var(--text-dim);
+}
+
+.mb-card-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--red);
+  line-height: 1.25;
+}
+
+.mb-card small {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+/* ---- 每日签到 ---- */
+.checkin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+}
+
+.checkin-info {
+  flex: 1;
+  min-width: 200px;
+}
+
+.checkin-streak {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: var(--amber);
+  margin-bottom: 2px;
+}
+
+.checkin-streak strong {
+  font-size: 1.15rem;
+}
+
+.checkin-btn {
+  width: auto;
+  padding: 10px 20px;
+  font-size: 0.85rem;
+  flex: none;
+}
+
+.checkin-btn.done {
+  background: var(--jade);
+}
+
+.checkin-days-wrap {
+  margin-top: 12px;
+}
+
+.checkin-days-label {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.checkin-days {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.checkin-day {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: rgba(45, 138, 78, 0.1);
+  color: var(--jade);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.turnstile-box {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+}
+
+.turnstile-box .setting-desc {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+/* ---- 订阅套餐 ---- */
+.pending-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: rgba(184, 134, 11, 0.08);
+  border: 1px solid rgba(184, 134, 11, 0.25);
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  color: var(--amber);
+}
+
+.pending-banner span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.plan-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+.plan-card.current {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold);
+}
+
+.plan-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: rgba(201, 168, 76, 0.18);
+  color: var(--gold);
+}
+
+.plan-card h4 {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.plan-price {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--red);
+}
+
+.plan-price small {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.plan-desc {
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.plan-feats {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 4px 0;
+}
+
+.plan-feats li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  color: var(--text-dim);
+}
+
+.plan-feats svg {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.plan-card .btn-primary,
+.plan-card .btn-ghost {
+  margin-top: auto;
+  padding: 9px 16px;
+  font-size: 0.82rem;
+}
+
+.plan-note {
+  margin-top: 10px;
+}
+
+/* ---- 管理端：额度弹窗 ---- */
+.quota-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.quota-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.quota-summary span {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.quota-summary strong {
+  font-size: 0.95rem;
+}
+
+.quota-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.quota-actions .btn-primary,
+.quota-actions .btn-ghost {
+  width: auto;
+  padding: 8px 14px;
+  font-size: 0.8rem;
+}
+
+/* 额度流水里的增减色（用户端额度面板与管理端弹窗共用） */
+.qty-up {
+  color: var(--jade);
+  font-weight: 600;
+}
+
+.qty-down {
+  color: var(--red);
+  font-weight: 600;
+}
+
+/* ---- 管理端：套餐页 ---- */
+.admin-plans .stat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.stat-chip strong {
+  color: var(--text);
+}
+
+.admin-table-compact th,
+.admin-table-compact td {
+  padding: 7px 10px;
+  font-size: 0.78rem;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* ---- 管理端：签到概况柱状 ---- */
+.checkin-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.checkin-stats .stat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.checkin-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 120px;
+  padding: 12px 12px 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow-x: auto;
+}
+
+.checkin-bar {
+  flex: 1;
+  min-width: 22px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+}
+
+.checkin-bar-fill {
+  width: 100%;
+  max-width: 26px;
+  background: linear-gradient(180deg, var(--jade-light), var(--jade));
+  border-radius: 3px 3px 0 0;
+  transition: height 0.3s ease;
+}
+
+.checkin-bar span {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ---- 管理端：站点设置的签到输入组 ---- */
+.checkin-inputs,
+.turnstile-inputs {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  max-width: 560px;
+}
+
+.checkin-inputs label,
+.turnstile-inputs label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.checkin-inputs input,
+.turnstile-inputs input {
+  width: 110px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  font-size: 0.82rem;
+  font-family: var(--mono);
+}
+
+.turnstile-inputs input {
+  width: 210px;
+  font-size: 0.76rem;
+}
+
+.checkin-inputs .btn-primary,
+.checkin-inputs .btn-ghost {
+  width: auto;
+  padding: 8px 18px;
+  font-size: 0.82rem;
+}
+
+.turnstile-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.turnstile-actions .btn-primary,
+.turnstile-actions .btn-ghost {
+  width: auto;
+  padding: 8px 16px;
+  font-size: 0.8rem;
+}
+
+.setting-ok {
+  color: var(--jade);
+  font-weight: 600;
+}
+
+/* 用户表标记 ---- */
+.badge-plan {
+  background: rgba(201, 168, 76, 0.16);
+  color: var(--gold);
+}
+
+.badge-warn {
+  background: rgba(184, 134, 11, 0.14);
+  color: var(--amber);
+}
+
+/* 额度列：数字不折行（「53 次」不该被拆成两行） */
+.admin-table td.td-amount {
+  white-space: nowrap;
+}
+
+/* ---- 宽版弹层（额度面板用）---- */
+.sheet-wide {
+  max-width: 860px;
+}
+
+/* ---- 聊天错误里的操作按钮组 ---- */
+.chat-error-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/* ---- 设置项：字段行（额度弹窗用）---- */
+.admin-modal .field-row {
+  margin-bottom: 4px;
+}
+
+@media (max-width: 640px) {
+  .field-row {
+    grid-template-columns: 1fr;
+  }
+
+  .membership {
+    padding: 12px 14px 16px;
+  }
 }

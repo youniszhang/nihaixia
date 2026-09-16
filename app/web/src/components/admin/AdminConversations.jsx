@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api.js';
 import MarkdownMessage from '../MarkdownMessage.jsx';
+import Icon from '../Icon.jsx';
 
 function fmtTime(t) {
   return t ? t.replace('T', ' ').slice(0, 16) : '—';
@@ -61,7 +62,7 @@ export default function AdminConversations({ filter, onClearFilter }) {
           {filter && (
             <span className="filter-chip">
               用户：{filter.username}
-              <button onClick={onClearFilter} title="清除过滤">✕</button>
+              <button onClick={onClearFilter} title="清除过滤" aria-label="清除过滤"><Icon name="close" size={13} /></button>
             </span>
           )}
           <input
@@ -144,7 +145,7 @@ export default function AdminConversations({ filter, onClearFilter }) {
                   用户 {detail.session.username} · 创建于 {fmtTime(detail.session.created_at)}
                 </p>
               </div>
-              <button className="icon-btn" onClick={() => setDetail(null)}>✕</button>
+              <button className="icon-btn" onClick={() => setDetail(null)} title="关闭" aria-label="关闭"><Icon name="close" size={18} /></button>
             </div>
             {detail.session.pin && (
               <div className="modal-pin">

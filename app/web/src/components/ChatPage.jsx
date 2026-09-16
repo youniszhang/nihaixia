@@ -7,6 +7,8 @@ import IntakeSheet from './IntakeSheet.jsx';
 import Sidebar from './Sidebar.jsx';
 import AdminConsole from './AdminConsole.jsx';
 import DisclaimerModal from './DisclaimerModal.jsx';
+import MembershipPanel from './MembershipPanel.jsx';
+import Icon from './Icon.jsx';
 
 const DISCLAIMER_SEEN_KEY = 'nhx_disclaimer_accepted_v1';
 
@@ -21,12 +23,15 @@ export default function ChatPage() {
   const [showProfile, setShowProfile] = useState(false);
   const [showIntake, setShowIntake] = useState(false);
   const [showAdminConsole, setShowAdminConsole] = useState(false);
+  const [showMembership, setShowMembership] = useState(false);
   const [showDisclaimer, setShowDisclaimer] = useState(
     typeof localStorage !== 'undefined' && !localStorage.getItem(DISCLAIMER_SEEN_KEY)
   );
   const [intakeNote, setIntakeNote] = useState(''); // pinned summary (十问/舌象) for active session
   const [sessionTitle, setSessionTitle] = useState('');
   const [errNote, setErrNote] = useState(''); // 最近一次生成失败的原因（常驻到下次发送）
+  const [quota, setQuota] = useState(null);   // 剩余额度 / 今日用量
+  const [checkedInToday, setCheckedInToday] = useState(false);
 
   function acceptDisclaimer() {
     try { localStorage.setItem(DISCLAIMER_SEEN_KEY, '1'); } catch { /* private mode */ }
@@ -45,7 +50,17 @@ export default function ChatPage() {
     } catch { /* ignore */ }
   }, []);
 
+  // 额度与签到状态：进入页面、每次签到/问诊后刷新（侧边栏与顶部徽标都用它）
+  const refreshQuota = useCallback(async () => {
+    try {
+      const d = await api.checkin();
+      setQuota(d.quota);
+      setCheckedInToday(Boolean(d.checkin?.checked_in));
+    } catch { /* 接口异常时保持上一次的值 */ }
+  }, []);
+
   useEffect(() => { refreshSessions(); }, [refreshSessions]);
+  useEffect(() => { refreshQuota(); }, [refreshQuota]);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -121,10 +136,12 @@ export default function ChatPage() {
           setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc } : x)));
         } else if (ev.type === 'done') {
           setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, id: ev.message_id, content: acc } : x)));
+          // 服务端在 done 事件里带回最新额度，免去再发一次请求
+          if (ev.quota) setQuota(ev.quota);
           break;
         } else if (ev.type === 'notice') {
           // 中间提示（如自动重启浏览器重试）：临时显示在占位气泡里
-          setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc || `> ℹ️ ${ev.text}` } : x)));
+          setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc || `> 提示：${ev.text}` } : x)));
         } else if (ev.type === 'error') {
           // 失败原因单独保存：finally 里会用服务端持久化的消息覆盖气泡，
           // 只写进气泡的话错误会在刷新后消失，用户完全看不到发生了什么
@@ -138,6 +155,7 @@ export default function ChatPage() {
       setStreaming(false);
       abortRef.current = null;
       refreshSessions();
+      refreshQuota();
       // Refresh active session's persisted messages to reconcile ids
       api.getSession(sid).then((d) => {
         setMessages(d.messages || []);
@@ -152,6 +170,8 @@ export default function ChatPage() {
   }
 
   const activeSession = sessions.find((s) => s.id === activeId);
+  // 额度/上限类错误 → 直接把用户引到「我的额度」面板（签到或订阅）
+  const quotaBlocked = /额度|上限/.test(errNote);
 
   return (
     <div className={`app-shell ${sidebarOpen ? 'sidebar-visible' : ''}`}>
@@ -165,24 +185,37 @@ export default function ChatPage() {
         user={user}
         onLogout={logout}
         onAdminConsole={() => setShowAdminConsole(true)}
+        onMembership={() => setShowMembership(true)}
         onClose={() => setSidebarOpen(false)}
+        quota={quota}
+        checkedInToday={checkedInToday}
       />
 
       <main className="main">
         <header className="main-header">
           <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="菜单">
-            ☰
+            <Icon name="menu" size={20} />
           </button>
           <div className="header-title">
             <h1>{activeSession?.title || '新问诊'}</h1>
             {intakeNote && (
               <button className="pin-chip" onClick={removeIntake} title="移除问诊摘要">
-                📋 已附问诊摘要 ✕
+                <Icon name="clipboard" size={13} /> 已附问诊摘要 <Icon name="close" size={12} />
               </button>
             )}
           </div>
+          {quota && (
+            <button
+              className={`quota-badge ${!quota.unlimited && quota.credits <= 3 ? 'low' : ''}`}
+              onClick={() => setShowMembership(true)}
+              title="查看额度、签到与订阅"
+            >
+              <Icon name="coins" size={15} />
+              {quota.unlimited ? '不限次' : `剩余 ${quota.credits}`}
+            </button>
+          )}
           <button className="icon-btn" onClick={() => setShowIntake(true)} title="十问 / 舌象 快速问诊单" aria-label="问诊单">
-            🩺
+            <Icon name="stethoscope" size={20} />
           </button>
         </header>
 
@@ -210,7 +243,9 @@ export default function ChatPage() {
                     <div className="msg-body">
                       {m.role === 'assistant' ? <MarkdownMessage content={m.content} /> : <div className="msg-plain">{m.content}</div>}
                       {m.role === 'assistant' && m.content && (
-                        <p className="msg-tag">⚠️ 以上内容由 AI 生成，仅供中医学习参考，不构成医疗建议</p>
+                        <p className="msg-tag">
+                          <Icon name="alert" size={13} /> 以上内容由 AI 生成，仅供中医学习参考，不构成医疗建议
+                        </p>
                       )}
                     </div>
                   </div>
@@ -224,8 +259,15 @@ export default function ChatPage() {
         <div className="composer-wrap">
           {errNote && (
             <div className="chat-error" role="alert">
-              <span>⚠️ {errNote}</span>
-              <button type="button" className="text-btn" onClick={() => setErrNote('')}>知道了</button>
+              <span><Icon name="alert" size={15} /> {errNote}</span>
+              <span className="chat-error-actions">
+                {quotaBlocked && (
+                  <button type="button" className="text-btn" onClick={() => { setShowMembership(true); setErrNote(''); }}>
+                    去签到 / 订阅
+                  </button>
+                )}
+                <button type="button" className="text-btn" onClick={() => setErrNote('')}>知道了</button>
+              </span>
             </div>
           )}
           <div className="composer">
@@ -235,17 +277,23 @@ export default function ChatPage() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
               }}
-              placeholder={activeId ? '描述你的症状，或按倪师的思路问诊…' : '点击上方 🩺 填写问诊单，或直接描述症状…'}
+              placeholder={activeId ? '描述你的症状，或按倪师的思路问诊…' : '点击右上方问诊单，或直接描述症状…'}
               rows={1}
             />
             <div className="composer-actions">
               <div className="composer-notes">
-                <button className="text-btn" onClick={() => setShowIntake(true)}>📋 十问 / 舌象</button>
+                <button className="text-btn" onClick={() => setShowIntake(true)}>
+                  <Icon name="clipboard" size={14} /> 十问 / 舌象
+                </button>
               </div>
               {streaming ? (
-                <button className="stop-btn" onClick={stop} title="停止生成">⏹</button>
+                <button className="stop-btn" onClick={stop} title="停止生成" aria-label="停止生成">
+                  <Icon name="stop" size={16} />
+                </button>
               ) : (
-                <button className="send-btn" onClick={send} disabled={!input.trim()} title="发送">➤</button>
+                <button className="send-btn" onClick={send} disabled={!input.trim()} title="发送" aria-label="发送">
+                  <Icon name="send" size={17} />
+                </button>
               )}
             </div>
           </div>
@@ -259,7 +307,12 @@ export default function ChatPage() {
       {showProfile && (
         <div className="overlay" onClick={() => setShowProfile(false)}>
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="sheet-head"><h2>体质档案</h2><button className="icon-btn" onClick={() => setShowProfile(false)}>✕</button></div>
+            <div className="sheet-head">
+              <h2>体质档案</h2>
+              <button className="icon-btn" onClick={() => setShowProfile(false)} aria-label="关闭">
+                <Icon name="close" size={18} />
+              </button>
+            </div>
             <ProfileForm onClose={() => setShowProfile(false)} />
           </div>
         </div>
@@ -268,8 +321,30 @@ export default function ChatPage() {
       {showIntake && (
         <div className="overlay" onClick={() => setShowIntake(false)}>
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="sheet-head"><h2>问诊单 · 十问 / 舌象</h2><button className="icon-btn" onClick={() => setShowIntake(false)}>✕</button></div>
+            <div className="sheet-head">
+              <h2>问诊单 · 十问 / 舌象</h2>
+              <button className="icon-btn" onClick={() => setShowIntake(false)} aria-label="关闭">
+                <Icon name="close" size={18} />
+              </button>
+            </div>
             <IntakeSheet onApply={applyIntake} onClose={() => setShowIntake(false)} />
+          </div>
+        </div>
+      )}
+
+      {showMembership && (
+        <div className="overlay" onClick={() => setShowMembership(false)}>
+          <div className="sheet sheet-wide" onClick={(e) => e.stopPropagation()}>
+            <div className="sheet-head">
+              <h2><Icon name="coins" size={18} /> 我的额度</h2>
+              <button className="icon-btn" onClick={() => setShowMembership(false)} aria-label="关闭">
+                <Icon name="close" size={18} />
+              </button>
+            </div>
+            <MembershipPanel
+              onClose={() => setShowMembership(false)}
+              onQuotaChange={(q) => { if (q) setQuota(q); }}
+            />
           </div>
         </div>
       )}
@@ -292,8 +367,12 @@ function EmptyState({ onIntake, onNew }) {
       <h2>倪海厦中医问诊</h2>
       <p className="empty-quote">「中医很简单，就是阴阳气血。你搞懂了，一通百通。」</p>
       <div className="empty-actions">
-        <button className="btn-primary" onClick={onIntake}>🩺 填写问诊单</button>
-        <button className="btn-ghost" onClick={onNew}>＋ 新问诊</button>
+        <button className="btn-primary" onClick={onIntake}>
+          <Icon name="stethoscope" size={17} /> 填写问诊单
+        </button>
+        <button className="btn-ghost" onClick={onNew}>
+          <Icon name="plus" size={16} /> 新问诊
+        </button>
       </div>
       <div className="suggestions">
         <button onClick={() => onIntake()}>我感冒了，怕冷没汗</button>

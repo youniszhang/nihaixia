@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api.js';
+import Icon from '../Icon.jsx';
 
 function fmtChars(n) {
   if (!n) return '0';
@@ -68,10 +69,10 @@ export default function AdminDashboard({ onGoTab }) {
       </div>
 
       <div className="admin-quick-actions">
-        <button className="btn-ghost" onClick={() => onGoTab('users')}>👥 用户管理</button>
-        <button className="btn-ghost" onClick={() => onGoTab('conversations')}>💬 查看对话记录</button>
-        <button className="btn-ghost" onClick={() => onGoTab('reports')}>📈 使用报表</button>
-        <button className="btn-ghost" onClick={() => onGoTab('model')}>⚙️ 模型设置</button>
+        <button className="btn-ghost" onClick={() => onGoTab('users')}><Icon name="users" size={15} /> 用户管理</button>
+        <button className="btn-ghost" onClick={() => onGoTab('conversations')}><Icon name="message" size={15} /> 查看对话记录</button>
+        <button className="btn-ghost" onClick={() => onGoTab('reports')}><Icon name="trending" size={15} /> 使用报表</button>
+        <button className="btn-ghost" onClick={() => onGoTab('model')}><Icon name="settings" size={15} /> 模型设置</button>
       </div>
     </div>
   );
