@@ -38,7 +38,7 @@ export const api = {
   me: () => request('/api/auth/me'),
   authConfig: () => request('/api/auth/config'),
   login: (username, password) => request('/api/auth/login', { method: 'POST', body: { username, password } }),
-  register: (username, password) => request('/api/auth/register', { method: 'POST', body: { username, password } }),
+  register: (username, password, inviteCode = '') => request('/api/auth/register', { method: 'POST', body: { username, password, invite_code: inviteCode } }),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
 
   // profile
@@ -92,6 +92,12 @@ export const api = {
   adminSaveSite: (patch) => request('/api/admin/site', { method: 'PUT', body: patch }),
   adminAudit: (limit = 100) => request(`/api/admin/audit?limit=${limit}`),
 
+  // 管理后台：邀请码
+  adminInvites: () => request('/api/admin/invites'),
+  adminCreateInvite: (payload) => request('/api/admin/invites', { method: 'POST', body: payload }),
+  adminToggleInvite: (id, disabled) => request(`/api/admin/invites/${id}`, { method: 'PATCH', body: { disabled } }),
+  adminDeleteInvite: (id) => request(`/api/admin/invites/${id}`, { method: 'DELETE' }),
+
   // 管理后台：套餐 / 订阅 / 签到报表 / 单用户额度明细
   adminPlans: () => request('/api/admin/plans'),
   adminCreatePlan: (plan) => request('/api/admin/plans', { method: 'POST', body: plan }),
@@ -114,7 +120,13 @@ export const api = {
   // sessions
   listSessions: () => request('/api/sessions'),
   createSession: (title) => request('/api/sessions', { method: 'POST', body: { title } }),
-  getSession: (id) => request(`/api/sessions/${id}`),
+  // 历史会话按页拉取（长会话全量返回会明显变慢）；beforeId 用于向上翻页
+  getSession: (id, { limit = 60, beforeId = null } = {}) => {
+    const p = new URLSearchParams();
+    p.set('limit', String(limit));
+    if (beforeId) p.set('before_id', String(beforeId));
+    return request(`/api/sessions/${id}?${p.toString()}`);
+  },
   renameSession: (id, title) => request(`/api/sessions/${id}`, { method: 'PATCH', body: { title } }),
   setSessionPin: (id, pin) => request(`/api/sessions/${id}`, { method: 'PATCH', body: { pin } }),
   deleteSession: (id) => request(`/api/sessions/${id}`, { method: 'DELETE' }),

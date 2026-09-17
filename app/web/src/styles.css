@@ -3091,3 +3091,94 @@ body {
     padding: 12px 14px 16px;
   }
 }
+
+/* ===== 邀请码（管理后台） ===== */
+.invite-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  align-items: flex-end;
+  margin: 12px 0 4px;
+}
+
+.field-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.field-inline.grow { flex: 1 1 200px; }
+
+.field-inline input {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.86rem;
+  font-family: inherit;
+  background: var(--bg-card);
+  color: var(--text);
+}
+
+.field-inline em {
+  font-style: normal;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.invite-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.86rem;
+  letter-spacing: 0.06em;
+  background: var(--bg-elevated);
+  padding: 3px 7px;
+  border-radius: 5px;
+}
+
+.invite-status {
+  font-size: 0.76rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.invite-status.ok { background: rgba(45,138,78,.12); color: var(--jade); }
+.invite-status.used,
+.invite-status.off { background: rgba(120,120,120,.12); color: var(--text-muted); }
+.invite-status.expired { background: rgba(192,57,43,.1); color: var(--red); }
+
+.invite-actions { display: flex; gap: 10px; white-space: nowrap; }
+
+.text-btn.danger { color: var(--red); }
+
+.admin-ok {
+  font-size: 0.82rem;
+  color: var(--jade);
+  margin: 8px 0 0;
+  word-break: break-all;
+}
+
+.admin-empty {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  padding: 12px 0;
+}
+
+/* ===== 历史消息分页入口 ===== */
+.load-earlier {
+  display: flex;
+  justify-content: center;
+  padding: 10px 0 14px;
+}
+
+.load-earlier .text-btn {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-card);
+}
+
+.load-earlier .text-btn:hover:not(:disabled) { color: var(--red); border-color: var(--red); }

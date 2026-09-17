@@ -1,6 +1,6 @@
 import {
   createSession, listSessions, getSession, renameSession,
-  deleteSession, listMessages,
+  deleteSession, listMessages, listMessagesPage,
 } from '../db.js';
 import { sendError, clamp } from '../lib/validate.js';
 
@@ -30,10 +30,17 @@ export default async function sessionRoutes(fastify) {
   fastify.get('/:id', auth, async (req, reply) => {
     const s = ownSession(req, reply, req.params.id);
     if (!s) return;
-    return {
+    // 默认只回最近一页（长会话全量返回会让「点开历史」明显变慢）；
+    // 传 before_id 向前翻页。all=1 保留旧行为（导出/兼容用）。
+    const { limit, before_id: beforeId, all } = req.query || {};
+    const base = {
       session: { id: s.id, title: s.title, pin: s.pin, created_at: s.created_at },
-      messages: listMessages(s.id, 500),
     };
+    if (all === '1') {
+      return { ...base, messages: listMessages(s.id, 2000), total: null, has_more: false };
+    }
+    const page = listMessagesPage(s.id, { limit: limit ?? 60, beforeId: beforeId ?? null });
+    return { ...base, messages: page.messages, total: page.total, has_more: page.has_more };
   });
 
   fastify.patch('/:id', auth, async (req, reply) => {

@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import config from './config.js';
@@ -99,6 +100,23 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_log(created_at DESC);
+
+-- 邀请码：仅凭码可注册；一码一用、可设有效期；管理员在后台生成/停用/删除。
+-- used_by 记录使用者（不留用户名副本，避免用户改名后展示漂移，查询时 JOIN）。
+CREATE TABLE IF NOT EXISTS invite_codes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL UNIQUE,
+  note TEXT DEFAULT '',
+  max_uses INTEGER NOT NULL DEFAULT 1,
+  used_count INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT,
+  disabled INTEGER NOT NULL DEFAULT 0,
+  created_by TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_used_at TEXT,
+  last_used_by INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_invite_code ON invite_codes(code);
 `);
 
 // ---------- settings ----------
@@ -261,6 +279,95 @@ export function getUserTokenVersion(id) {
 }
 export function bumpTokenVersion(id) {
   db.prepare('UPDATE users SET token_version = COALESCE(token_version, 0) + 1 WHERE id = ?').run(id);
+}
+
+// ---------- 邀请码 ----------
+// 语义：注册必须提供有效邀请码（一码一用、可带有效期）。管理员可生成/停用/删除。
+// 生成时避开易混字符（0/O/1/I/l），降低手抄出错率。
+const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+function randomCode(len = 12) {
+  const bytes = crypto.randomBytes(len);
+  let out = '';
+  for (let i = 0; i < len; i++) out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+  return out;
+}
+
+export function createInviteCode({ note = '', maxUses = 1, expiresAt = null, createdBy = '' } = {}) {
+  const uses = Math.max(1, Math.min(Math.floor(Number(maxUses) || 1), 1000));
+  // 唯一性：随机碰撞概率极低，但仍重试几次
+  for (let i = 0; i < 8; i++) {
+    const code = randomCode();
+    try {
+      db.prepare(`INSERT INTO invite_codes (code, note, max_uses, expires_at, created_by)
+        VALUES (?,?,?,?,?)`).run(code, String(note || '').slice(0, 100), uses, expiresAt || null, createdBy || '');
+      return getInviteCode(code);
+    } catch (e) {
+      if (!/UNIQUE/i.test(String(e.message))) throw e;
+    }
+  }
+  throw new Error('邀请码生成失败，请重试');
+}
+
+export function getInviteCode(code) {
+  return db.prepare('SELECT * FROM invite_codes WHERE code = ?').get(String(code || '').trim().toUpperCase()) || null;
+}
+
+export function listInviteCodes(limit = 200) {
+  return db.prepare(`
+    SELECT ic.*, u.username AS last_used_username
+    FROM invite_codes ic
+    LEFT JOIN users u ON u.id = ic.last_used_by
+    ORDER BY ic.id DESC LIMIT ?`).all(Math.min(Math.max(Number(limit) || 200, 1), 500));
+}
+
+export function setInviteCodeDisabled(id, disabled) {
+  db.prepare('UPDATE invite_codes SET disabled = ? WHERE id = ?').run(disabled ? 1 : 0, id);
+}
+
+export function deleteInviteCode(id) {
+  db.prepare('DELETE FROM invite_codes WHERE id = ?').run(id);
+}
+
+// 纯校验（不消费）：先判断码是否可用，避免用户建好后再报「码无效」。
+export function checkInviteCode(code) {
+  const c = getInviteCode(code);
+  if (!c) return { ok: false, reason: 'invalid' };
+  if (c.disabled) return { ok: false, reason: 'disabled' };
+  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  if (c.expires_at && String(c.expires_at).slice(0, 19) <= now) return { ok: false, reason: 'expired' };
+  if (c.used_count >= c.max_uses) return { ok: false, reason: 'used' };
+  return { ok: true, code: c.code };
+}
+
+// 校验并「消费」一次邀请码（绑定使用者）。失败返回 { ok:false, reason }。
+// 放在事务里：校验与自增必须原子，避免并发注册时一个码被用两次。
+export function consumeInviteCode(code, userId) {
+  const pre = checkInviteCode(code);
+  if (!pre.ok) return pre;
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const c = getInviteCode(code);
+    // 事务内复检（另一个请求可能刚用掉）
+    if (!c || c.disabled || c.used_count >= c.max_uses) {
+      db.exec('ROLLBACK');
+      return { ok: false, reason: 'used' };
+    }
+    db.prepare(`UPDATE invite_codes SET used_count = used_count + 1,
+        last_used_at = datetime('now'), last_used_by = ? WHERE id = ?`).run(userId ?? null, c.id);
+    db.exec('COMMIT');
+    return { ok: true, code: c.code };
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+}
+
+// 是否需要邀请码：与「开放注册（无需邀请码）」开关互为反面。
+// 即 registration_enabled=true 时可直接注册；否则必须凭邀请码（管理员定向发放）。
+export function inviteRequired() {
+  return !isRegistrationOpen();
 }
 // 批量操作：ids 为数字数组，返回实际影响条数。
 // 整体包在事务里：任一失败则全部回滚，避免"禁用了一半"的中间态。
@@ -467,6 +574,24 @@ export function listRecentMessages(sessionId, limit = 30) {
 }
 export function countMessages(sessionId) {
   return db.prepare('SELECT COUNT(*) c FROM messages WHERE session_id = ?').get(sessionId).c;
+}
+// 分页取消息（用于历史会话按需加载）：
+// 返回最新的 limit 条（按 id ASC 输出，便于直接渲染），可传 beforeId 向前翻页。
+// 长会话（几百条、每条数 KB）一次性全量返回会让打开历史明显变慢。
+export function listMessagesPage(sessionId, { limit = 60, beforeId = null } = {}) {
+  const n = Math.min(Math.max(Math.floor(Number(limit) || 60), 1), 200);
+  const rows = beforeId
+    ? db.prepare(`SELECT id, role, content, created_at FROM messages
+        WHERE session_id = ? AND id < ? ORDER BY id DESC LIMIT ?`).all(sessionId, Number(beforeId), n)
+    : db.prepare(`SELECT id, role, content, created_at FROM messages
+        WHERE session_id = ? ORDER BY id DESC LIMIT ?`).all(sessionId, n);
+  rows.reverse();
+  const total = countMessages(sessionId);
+  const minId = rows.length ? rows[0].id : null;
+  const hasMore = minId != null
+    ? db.prepare('SELECT 1 FROM messages WHERE session_id = ? AND id < ? LIMIT 1').get(sessionId, minId) != null
+    : false;
+  return { messages: rows, total, has_more: hasMore };
 }
 
 // ================= 额度 / 每日打卡（签到） / 订阅 =================

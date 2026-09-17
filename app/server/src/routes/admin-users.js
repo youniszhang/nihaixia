@@ -18,6 +18,7 @@ import {
   listSubscriptions, subscriptionStats, approveSubscription, rejectSubscription,
   cancelSubscriptionById, applySubscription, pendingSubscription, expireSubscriptions,
   getCheckinSettings, checkinSummary, checkinDaily, listCheckins, listCreditLog,
+  createInviteCode, listInviteCodes, setInviteCodeDisabled, deleteInviteCode, inviteRequired,
 } from '../db.js';
 import { hashPassword } from '../lib/password.js';
 import { isValidUsername, isValidPassword, sendError, clamp } from '../lib/validate.js';
@@ -494,5 +495,53 @@ export default async function adminUserRoutes(fastify) {
     if (!requireAdmin(req, reply)) return;
     const limit = Math.min(Number(req.query?.limit) || 100, 500);
     return { logs: listAudit(limit) };
+  });
+
+  // ---------- 邀请码 ----------
+  fastify.get('/invites', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    return {
+      invites: listInviteCodes(Math.min(Number(req.query?.limit) || 200, 500)),
+      invite_required: inviteRequired(),
+    };
+  });
+
+  fastify.post('/invites', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const b = req.body || {};
+    const maxUses = Math.min(Math.max(Math.floor(Number(b.max_uses) || 1), 1), 1000);
+    // 有效期：传天数则换算成绝对时间（默认 7 天；0/空 = 永不过期）
+    let expiresAt = null;
+    const days = Number(b.expires_in_days);
+    if (b.expires_in_days != null && b.expires_in_days !== '' && days > 0) {
+      expiresAt = new Date(Date.now() + days * 24 * 3600 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+    }
+    const created = createInviteCode({
+      note: b.note, maxUses, expiresAt, createdBy: req.user.username,
+    });
+    addAudit({
+      actor: req.user, action: 'invite.create',
+      target: created.code, detail: `可用 ${maxUses} 次，有效期 ${expiresAt || '永久'}`,
+    });
+    return reply.code(201).send({ invite: created });
+  });
+
+  fastify.patch('/invites/:id', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const id = Number(req.params.id);
+    const b = req.body || {};
+    if (b.disabled != null) {
+      setInviteCodeDisabled(id, Boolean(b.disabled));
+      addAudit({ actor: req.user, action: 'invite.toggle', target: `#${id}`, detail: b.disabled ? '停用' : '启用' });
+    }
+    return { ok: true };
+  });
+
+  fastify.delete('/invites/:id', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const id = Number(req.params.id);
+    deleteInviteCode(id);
+    addAudit({ actor: req.user, action: 'invite.delete', target: `#${id}`, detail: '' });
+    return { ok: true };
   });
 }

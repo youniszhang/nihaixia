@@ -18,8 +18,8 @@ export function AuthProvider({ children }) {
     const { user } = await api.login(u, p);
     setUser(user);
   }, []);
-  const register = useCallback(async (u, p) => {
-    const { user } = await api.register(u, p);
+  const register = useCallback(async (u, p, inviteCode = '') => {
+    const { user } = await api.register(u, p, inviteCode);
     setUser(user);
   }, []);
   const logout = useCallback(async () => {

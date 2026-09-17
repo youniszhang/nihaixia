@@ -32,6 +32,13 @@ export default function ChatPage() {
   const [errNote, setErrNote] = useState(''); // 最近一次生成失败的原因（常驻到下次发送）
   const [quota, setQuota] = useState(null);   // 剩余额度 / 今日用量
   const [checkedInToday, setCheckedInToday] = useState(false);
+  // 历史加载：默认只取最近一页；向上滚动再按需加载更早的（长会话全量渲染会明显卡顿）
+  const PAGE_SIZE = 40;
+  const RENDER_WINDOW = 60; // 同时渲染的消息上限（更早的折叠为「显示更早」）
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [renderAll, setRenderAll] = useState(false);
+  const oldestIdRef = useRef(null);
 
   function acceptDisclaimer() {
     try { localStorage.setItem(DISCLAIMER_SEEN_KEY, '1'); } catch { /* private mode */ }
@@ -40,6 +47,7 @@ export default function ChatPage() {
 
   const scrollRef = useRef(null);
   const abortRef = useRef(null);
+  const scrollHostRef = useRef(null);
   const listRef = useRef(sessions);
   listRef.current = sessions;
 
@@ -71,13 +79,40 @@ export default function ChatPage() {
     if (streaming) { abortRef.current?.abort(); setStreaming(false); }
     setActiveId(id);
     setMessages([]);
+    setHasMore(false);
+    setRenderAll(false);
     try {
-      const data = await api.getSession(id);
+      // 只取最近一页：长会话（几百条 × 每条数 KB）全量返回 + 全量渲染是「点开历史很慢」的主因
+      const data = await api.getSession(id, { limit: PAGE_SIZE });
       setMessages(data.messages || []);
+      setHasMore(Boolean(data.has_more));
+      oldestIdRef.current = data.messages?.[0]?.id ?? null;
       setIntakeNote(data.session.pin || '');
       setSessionTitle(data.session.title);
     } catch { /* ignore */ }
     setSidebarOpen(false);
+  }
+
+  // 向上翻页：加载更早的一页并插到列表头部（保持滚动位置不跳）
+  async function loadEarlier() {
+    if (!activeId || loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    const scrollEl = scrollHostRef.current;
+    const prevHeight = scrollEl ? scrollEl.scrollHeight : 0;
+    try {
+      const data = await api.getSession(activeId, { limit: PAGE_SIZE, beforeId: oldestIdRef.current });
+      const earlier = data.messages || [];
+      if (earlier.length) {
+        oldestIdRef.current = earlier[0].id;
+        setMessages((m) => [...earlier, ...m]);
+        // 插入后把视口钉回原来的位置，避免"跳到顶部"
+        requestAnimationFrame(() => {
+          if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight - prevHeight;
+        });
+      }
+      setHasMore(Boolean(data.has_more));
+    } catch { /* ignore */ }
+    setLoadingMore(false);
   }
 
   async function newSession() {
@@ -157,8 +192,11 @@ export default function ChatPage() {
       refreshSessions();
       refreshQuota();
       // Refresh active session's persisted messages to reconcile ids
-      api.getSession(sid).then((d) => {
+      // 只回填最近一页（刚发完的消息一定在这页里），避免长会话重新拉全量
+      api.getSession(sid, { limit: PAGE_SIZE }).then((d) => {
         setMessages(d.messages || []);
+        setHasMore(Boolean(d.has_more));
+        oldestIdRef.current = d.messages?.[0]?.id ?? null;
         setSessionTitle(d.session.title);
       }).catch(() => {});
     }
@@ -219,12 +257,28 @@ export default function ChatPage() {
           </button>
         </header>
 
-        <div className="chat-scroll">
+        <div className="chat-scroll" ref={scrollHostRef}>
           {messages.length === 0 && !streaming ? (
             <EmptyState onIntake={() => setShowIntake(true)} onNew={newSession} />
           ) : (
             <div className="msg-list">
-              {messages.map((m) => {
+              {(hasMore || (!renderAll && messages.length > RENDER_WINDOW)) && (
+                <div className="load-earlier">
+                  {hasMore ? (
+                    <button className="text-btn" onClick={loadEarlier} disabled={loadingMore}>
+                      {loadingMore ? '加载中…' : '加载更早的记录'}
+                    </button>
+                  ) : (
+                    <button className="text-btn" onClick={() => setRenderAll(true)}>
+                      显示更早的 {messages.length - RENDER_WINDOW} 条
+                    </button>
+                  )}
+                </div>
+              )}
+              {(renderAll || messages.length <= RENDER_WINDOW
+                ? messages
+                : messages.slice(-RENDER_WINDOW)
+              ).map((m) => {
                 // 回复占位（还没收到第一个字）：只渲染一个带打字动画的气泡
                 if (m.role === 'assistant' && !m.content) {
                   if (streaming && m.id === messages[messages.length - 1]?.id) {

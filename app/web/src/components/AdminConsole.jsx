@@ -6,6 +6,7 @@ import AdminConversations from './admin/AdminConversations.jsx';
 import AdminReports from './admin/AdminReports.jsx';
 import AdminPlans from './admin/AdminPlans.jsx';
 import AdminSite from './admin/AdminSite.jsx';
+import AdminInvites from './admin/AdminInvites.jsx';
 import AdminSettings from './AdminSettings.jsx';
 import SystemUpdate from './SystemUpdate.jsx';
 import Icon from './Icon.jsx';
@@ -18,6 +19,7 @@ const TABS = [
   { key: 'conversations', label: '对话记录', icon: 'message' },
   { key: 'reports', label: '使用报表', icon: 'trending' },
   { key: 'plans', label: '订阅与额度', icon: 'crown' },
+  { key: 'invites', label: '邀请码', icon: 'key' },
   { key: 'model', label: '模型设置', icon: 'settings' },
   { key: 'site', label: '站点设置', icon: 'wrench' },
   { key: 'system', label: '系统更新', icon: 'refresh' },
@@ -90,6 +92,7 @@ export default function AdminConsole({ onClose, user }) {
           {tab === 'conversations' && <AdminConversations filter={convFilter} onClearFilter={() => setConvFilter(null)} />}
           {tab === 'reports' && <AdminReports />}
           {tab === 'plans' && <AdminPlans initialGrantFor={grantFor} onClearGrantFor={() => setGrantFor(null)} />}
+          {tab === 'invites' && <AdminInvites />}
           {tab === 'model' && <AdminSettings onClose={onClose} />}
           {tab === 'site' && <AdminSite />}
           {tab === 'system' && <SystemUpdate onClose={onClose} />}
