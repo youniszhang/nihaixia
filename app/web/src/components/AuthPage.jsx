@@ -56,7 +56,7 @@ export default function AuthPage() {
       <div className="auth-hero" aria-hidden>
         <div className="auth-hero-inner">
           <div className="auth-seal">医</div>
-          <h1>倪海厦中医问诊</h1>
+          <h1>中医问诊</h1>
           <p className="auth-quote">「中医很简单，就是阴阳气血。你搞懂了，一通百通。」</p>
           <p className="auth-sub">经方派问诊 · 六经辨证 · 深入浅出</p>
         </div>

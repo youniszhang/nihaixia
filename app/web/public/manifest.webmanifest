@@ -1,6 +1,6 @@
 {
-  "name": "倪海厦中医问诊",
-  "short_name": "倪海厦问诊",
+  "name": "中医问诊",
+  "short_name": "中医问诊",
   "description": "经方派 AI 问诊助手：六经辨证、经方选药、十问舌象、体质档案",
   "lang": "zh-CN",
   "start_url": "/",
