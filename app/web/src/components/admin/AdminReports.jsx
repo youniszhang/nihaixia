@@ -11,12 +11,14 @@ function fmtChars(n) {
 // 纯 CSS 柱状图：按天展示调用量（无图表依赖）
 function BarChart({ data, metric = 'calls' }) {
   const max = Math.max(1, ...data.map((d) => d[metric] || 0));
+  // 天数多时全量标注会挤成一团：按列宽稀释（横排 "MM-DD" 需要约 34px）
+  const every = Math.max(1, Math.ceil(data.length / 16));
   return (
     <div className="bar-chart">
-      {data.map((d) => (
+      {data.map((d, i) => (
         <div className="bar-col" key={d.day} title={`${d.day}\n调用 ${d.calls} 次 · ${d.users} 人`}>
           <div className="bar-fill" style={{ height: `${Math.max((d[metric] || 0) / max * 100, 2)}%` }} />
-          <span className="bar-x">{d.day.slice(5)}</span>
+          {(i % every === 0 || i === data.length - 1) && <span className="bar-x">{d.day.slice(5)}</span>}
         </div>
       ))}
       {data.length === 0 && <p className="td-empty">暂无数据</p>}

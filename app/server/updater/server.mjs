@@ -13,7 +13,9 @@
  */
 
 import { createServer } from 'node:http';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
@@ -70,27 +72,41 @@ async function detectCompose() {
 // 命令半路夭折，updater 可能就此消失。交给一个 detached 的临时容器执行 ——
 // 它不在 compose 管理范围内，不受本容器生命周期影响。
 //
-// ⚠️ 卷不能用 `-v ${PROJECT_DIR}:...`：/workspace 只是本容器内的挂载点，
-// 宿主机上并不存在该路径（真实路径是 /root/nihaixia）。用 --volumes-from <自身>
-// 让临时容器继承同样的挂载（卷的 Source 由 daemon 解析，路径自然正确）。
+// ⚠️ 路径坑（2026-09-17 实际踩过：把线上 updater 的 /workspace 挂成空目录，一键更新全挂）：
+//   容器里的 /workspace 只是**挂载点**，宿主机真实路径是别的（如 /root/nihaixia）。
+//   - `-v $PROJECT_DIR:...` 不行：拿容器内路径当宿主机路径，daemon 找不到就建空目录；
+//   - `--volumes-from self` + compose 相对路径 `..` 同样不行：compose 在临时容器里把 `..`
+//     解析成 /workspace，再把这个**容器内路径**发给 daemon，daemon 按**宿主机**去找 → 空目录。
+//   可靠做法：先用 docker inspect 问出宿主机真实路径，然后「用宿主机路径挂进临时容器」，
+//   使容器内路径 == 宿主机路径；此时 compose 的相对路径解析在客户端与 daemon 两侧一致。
 // 失败只记日志：此步在 web/api 部署成功之后，不该影响本次部署结论。
 async function scheduleSelfRebuild() {
   const HELPER = 'nihaixia-updater-selfbuild';
   try {
     const self = process.env.HOSTNAME;
     if (!self) throw new Error('拿不到容器 ID（HOSTNAME 为空）');
+
+    // 问出本容器挂载在宿主机上的真实路径（Mounts.Source）
+    const mountSource = async (dest) => (await run('docker', ['inspect', '-f',
+      `{{range .Mounts}}{{if eq .Destination "${dest}"}}{{.Source}}{{end}}{{end}}`, self])).trim();
+    const hostDir = await mountSource('/workspace');
+    if (!hostDir) throw new Error('拿不到 /workspace 的宿主机路径（docker inspect 的 Mounts 为空）');
+    const hostSock = (await mountSource('/var/run/docker.sock')) || '/var/run/docker.sock';
+
     await run('docker', ['rm', '-f', HELPER]).catch(() => {});
     await run('docker', [
       'run', '-d', '--rm', '--name', HELPER,
       // 基础镜像的 docker-entrypoint.sh 会把首参当 docker 子命令转发（同 Dockerfile 注释），
       // 这里必须显式覆盖 entrypoint，否则 `sh` 会被当成 `docker sh` 执行
       '--entrypoint', 'sh',
-      '--volumes-from', self,
-      '-w', PROJECT_DIR,
+      // 宿主机路径挂到同名容器路径：compose 相对路径的解析结果与 daemon 查找一致
+      '-v', `${hostDir}:${hostDir}`,
+      '-v', `${hostSock}:/var/run/docker.sock`,
+      '-w', hostDir,
       'docker:27-cli', '-c',
       `docker compose -f ${COMPOSE_FILE} --profile updater up -d --build updater`,
     ]);
-    log('🔁 已启动 updater 自更新（后台重建本容器，页面短暂无响应属正常，稍后自动恢复）');
+    log(`🔁 已启动 updater 自更新（后台重建本容器；工作目录 ${hostDir}，页面短暂无响应属正常，稍后自动恢复）`);
   } catch (err) {
     log(`⚠️ updater 自更新启动失败（不影响本次部署）：${(err.stderr || err.message || err).toString().slice(0, 200)}`);
   }
@@ -98,6 +114,31 @@ async function scheduleSelfRebuild() {
 
 async function currentCommit(ref = 'HEAD') {
   try { return await run('git', ['rev-parse', '--short', ref]); } catch { return null; }
+}
+
+// 环境自检：/workspace 必须是带 .git 的仓库，否则所有 git 操作（含版本检查/部署）都会失败。
+// 2026-09-17 事故：自更新时挂载路径搞错 → 新容器里 /workspace 是空目录，
+// 页面报 "fatal: not a git repository"，但失败只落在日志里、没人察觉。这里把它显性化。
+function checkWorkspace() {
+  try {
+    const st = fs.statSync(path.join(PROJECT_DIR, '.git'));
+    return st.isDirectory()
+      ? { ok: true }
+      : { ok: false, message: `工作目录 ${PROJECT_DIR} 下的 .git 不是目录` };
+  } catch {
+    // 附上宿主机视角的真实挂载来源，便于定位（容器内路径 ≠ 宿主机路径）
+    let src = '';
+    try {
+      src = execFileSync('docker', ['inspect', '-f',
+        `{{range .Mounts}}{{if eq .Destination "${PROJECT_DIR}"}}{{.Source}}{{end}}{{end}}`,
+        process.env.HOSTNAME || ''], { encoding: 'utf8' }).trim();
+    } catch { /* ignore */ }
+    return {
+      ok: false,
+      message: `${PROJECT_DIR} 不是 git 仓库（缺少 .git）。宿主机挂载来源=${src || '未知'}；`
+        + '若为空目录，说明重建 updater 容器时卷路径解析错误',
+    };
+  }
 }
 
 // 实时读取版本：本地 HEAD 总是现读（便宜）；远端要 git fetch 才知道有没有新提交，
@@ -130,6 +171,10 @@ async function doUpdate() {
   state.stage = 'git';
   state.message = '拉取代码…';
   try {
+    // 先自检工作目录：不是 git 仓库时给出可操作的错误，而不是让 git 抛晦涩报错
+    const ws = checkWorkspace();
+    if (!ws.ok) throw new Error(ws.message);
+
     state.localCommit = await currentCommit();
 
     // 检查已跟踪文件是否被本地改动（避免覆盖服务器热修）
@@ -232,12 +277,17 @@ const server = createServer(async (req, res) => {
   if (url === '/status') {
     // check=1 时实时 git fetch 拉取远端版本（页面打开/点「检查更新」用）
     const check = /(?:^|&)check=1(?:&|$)/.test(req.url.split('?')[1] || '');
-    await refreshVersions({ check });
+    // /workspace 不是 git 仓库时，一切 git 操作都会失败——先自检并把原因显性回传
+    const ws = checkWorkspace();
+    if (ws.ok) await refreshVersions({ check });
+    else { state.checkError = ws.message; state.localCommit = null; state.remoteCommit = null; }
     return send(res, 200, {
       running: state.running,
       ok: state.ok,
       stage: state.stage,
       message: state.message,
+      workspaceOk: ws.ok,
+      workspaceError: ws.ok ? null : ws.message,
       localCommit: state.localCommit,
       remoteCommit: state.remoteCommit,
       updateAvailable:

@@ -85,5 +85,24 @@ echo "== 5. 鉴权：错误 token 403 =="
 chk "403" "403" "$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer wrong' "http://127.0.0.1:$PORT/status")"
 
 echo
+echo "== 6. 工作目录不是 git 仓库：自检要给出可读原因（回归：2026-09-17 自更新挂载错误）=="
+BROKEN="$TMP/broken"
+mkdir -p "$BROKEN"
+BROKEN_PORT=18096
+UPDATER_TOKEN=smoke-token PROJECT_DIR="$BROKEN" GIT_BRANCH=main PORT=$BROKEN_PORT \
+  node updater/server.mjs > "$TMP/updater2.log" 2>&1 &
+SRV2=$!
+for i in $(seq 1 30); do
+  code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer smoke-token' "http://127.0.0.1:$BROKEN_PORT/health" || true)
+  [ "$code" = "200" ] && break; sleep 0.3
+done
+s=$(curl -s -H "$H" "http://127.0.0.1:$BROKEN_PORT/status?check=1")
+chk "workspaceOk=false" "False" "$(echo "$s" | jqv workspaceOk)"
+chk "workspaceError 提到不是 git 仓库" "True" "$(python3 -c "import json,sys;print('不是 git 仓库' in (json.loads(sys.stdin.read()).get('workspaceError') or ''))" <<< "$s")"
+chk "localCommit 为空" "None" "$(echo "$s" | jqv localCommit)"
+chk "checkError 非空（页面能显示原因）" "True" "$(python3 -c "import json,sys;print(bool(json.loads(sys.stdin.read()).get('checkError')))" <<< "$s")"
+kill $SRV2 2>/dev/null
+
+echo
 echo "===== 通过 $pass / 失败 $fail ====="
 [ "$fail" = "0" ]

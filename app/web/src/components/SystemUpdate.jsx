@@ -112,14 +112,26 @@ export default function SystemUpdate({ onClose }) {
             </div>
           </div>
 
-          {upd === true && !running && (
-            <p className="sys-update-tip">
-              远端有新提交（{s.localCommit || '?'} → {s.remoteCommit || '?'}），点「拉取并部署」即可上线。
+          {/* 工作目录异常（如重建容器时卷挂错 → /workspace 不是 git 仓库）要单独说清楚，
+              否则只会看到一句「检查远端版本失败：fatal: not a git repository」 */}
+          {s.workspaceOk === false ? (
+            <p className="auth-error">
+              服务器工作目录异常：{s.workspaceError}
+              <br />（一键更新需要 updater 容器能访问仓库目录；请检查服务器上 updater 的卷挂载，
+              或在服务器执行 <code>cd /root/nihaixia/app &amp;&amp; docker compose --profile updater up -d updater</code> 重建该容器）
             </p>
-          )}
-          {s.checkError && <p className="auth-error">检查远端版本失败：{s.checkError}</p>}
-          {!s.checkError && s.checkedAt && !checking && (
-            <p className="admin-hint">远端版本核对于 {String(s.checkedAt).replace('T', ' ').slice(0, 19)}（UTC）</p>
+          ) : (
+            <>
+              {upd === true && !running && (
+                <p className="sys-update-tip">
+                  远端有新提交（{s.localCommit || '?'} → {s.remoteCommit || '?'}），点「拉取并部署」即可上线。
+                </p>
+              )}
+              {s.checkError && <p className="auth-error">检查远端版本失败：{s.checkError}</p>}
+              {!s.checkError && s.checkedAt && !checking && (
+                <p className="admin-hint">远端版本核对于 {String(s.checkedAt).replace('T', ' ').slice(0, 19)}（UTC）</p>
+              )}
+            </>
           )}
 
           {/* 初始 message 就是「就绪」，与上面的运行状态重复，只在有实质状态时显示 */}

@@ -122,13 +122,17 @@ export default function AdminInvites() {
           </label>
           <label className="field-inline">
             <span>每码可用</span>
-            <input type="number" min="1" max="1000" value={maxUses} onChange={(e) => setMaxUses(e.target.value)} />
-            <em>次</em>
+            <div className="field-row">
+              <input type="number" min="1" max="1000" value={maxUses} onChange={(e) => setMaxUses(e.target.value)} />
+              <em>次</em>
+            </div>
           </label>
           <label className="field-inline">
             <span>有效期</span>
-            <input type="number" min="0" max="3650" value={days} onChange={(e) => setDays(e.target.value)} />
-            <em>天（0 = 永久）</em>
+            <div className="field-row">
+              <input type="number" min="0" max="3650" value={days} onChange={(e) => setDays(e.target.value)} />
+              <em>天（0 = 永久）</em>
+            </div>
           </label>
           <label className="field-inline grow">
             <span>备注</span>

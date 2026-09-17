@@ -1672,6 +1672,10 @@ body {
   cursor: pointer;
   font-family: inherit;
   transition: background 0.15s;
+  /* 图标与文字同一行、垂直居中：内联 SVG 默认按基线对齐会与文字错位 */
+  display: flex;
+  align-items: center;
+  gap: 9px;
 }
 
 .admin-nav-item:hover {
@@ -1700,6 +1704,10 @@ body {
   font-size: 0.8rem;
   cursor: pointer;
   font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
 }
 
 .admin-nav-back:hover {
@@ -2204,7 +2212,7 @@ body {
   align-items: flex-end;
   gap: 4px;
   height: 160px;
-  padding: 12px 12px 0;
+  padding: 12px 12px 2px;
   background: var(--bg-card);
   border: 1px solid var(--border-light);
   border-radius: var(--radius);
@@ -2213,14 +2221,17 @@ body {
 }
 
 .bar-col {
+  position: relative;
   flex: 1;
   min-width: 18px;
+  /* 日期标签用绝对定位钉在列底部，并从柱高里预留出空间（padding-bottom），
+     否则「柱体 100% 高 + 标签」会撑出卡片、标签被裁到边框外。 */
   height: 100%;
+  padding-bottom: 22px;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
   align-items: center;
-  gap: 4px;
 }
 
 .bar-fill {
@@ -2232,11 +2243,13 @@ body {
 }
 
 .bar-x {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
   font-size: 0.6rem;
   color: var(--text-muted);
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  padding-bottom: 4px;
+  white-space: nowrap;
 }
 
 /* 按用户折线图（SVG 手绘，见 AdminReports.jsx UserLineChart） */
@@ -3031,14 +3044,16 @@ body {
 }
 
 .checkin-bar {
+  position: relative;
   flex: 1;
   min-width: 22px;
+  /* 同 .bar-col：底部预留日期标签的空间，标签绝对定位 */
   height: 100%;
+  padding-bottom: 20px;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
   align-items: center;
-  gap: 4px;
 }
 
 .checkin-bar-fill {
@@ -3050,6 +3065,10 @@ body {
 }
 
 .checkin-bar span {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
   font-size: 0.6rem;
   color: var(--text-muted);
   white-space: nowrap;
@@ -3177,6 +3196,17 @@ body {
 
 .field-inline.grow { flex: 1 1 200px; }
 
+/* 数字输入 + 单位（「次」「天」）：两者同一行。
+   此前单位单独占一行，配合 .invite-form 的 align-items:flex-end，
+   会让「每码可用 / 有效期」比「生成数量」高出一行，输入框整体错位。 */
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.field-row input { width: 82px; }
+
 .field-inline input {
   padding: 8px 10px;
   border: 1px solid var(--border);
@@ -3191,6 +3221,7 @@ body {
   font-style: normal;
   font-size: 0.72rem;
   color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .invite-code {
