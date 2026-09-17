@@ -10,7 +10,7 @@ import {
   isAdminUser, listUsersWithStats, setUserStatus, setUserNote, setUserPassword,
   renameUser, deleteUser, findUserById, findUserByName, createUser, getSetting, setSetting, deleteSetting,
   getSession, adminListSessions, adminGetSessionMessages, adminSearchMessages,
-  usageSummary, usageDaily, usageByUser, usageByProvider,
+  usageSummary, usageDaily, usageByUser, usageByProvider, usageUserDaily,
   bulkSetUserStatus, bulkDeleteUsers, addAudit, listAudit,
   registrationAllowed, registrationIsExplicit, configuredAdminUsername, isAdminIdentity,
   setUserCredits, setUserDailyLimit, getUserCredits, resolveQuota, applyDefaultCredits,
@@ -41,6 +41,46 @@ function isConfiguredAdmin(username) {
 // 配置了 ADMIN_USERNAME 时，老 settings.admin_user_id 记录不再算管理员。
 function targetIsAdmin(target) {
   return isAdminIdentity(target);
+}
+
+// 把「按用户 × 按天」的扁平行转成折线图需要的结构：
+//   { days: [...完整日期轴...], series: [{ user_id, username, calls: [...] }] }
+// 日期轴必须补全（没有调用量的日子也要占位），否则折线会把缺口连起来、横轴失真。
+function usersDailySeries(days) {
+  const rows = usageUserDaily(days);
+  const axis = [];
+  const now = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    // 用本地日期拼 YYYY-MM-DD（与 SQLite date(...,'localtime') 对齐）
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    axis.push(`${d.getFullYear()}-${m}-${day}`);
+  }
+  const idxOf = new Map(axis.map((d, i) => [d, i]));
+  const byUser = new Map();
+  for (const r of rows) {
+    if (!byUser.has(r.user_id)) {
+      byUser.set(r.user_id, {
+        user_id: r.user_id,
+        username: r.username,
+        calls: new Array(axis.length).fill(0),
+        prompt_chars: new Array(axis.length).fill(0),
+        completion_chars: new Array(axis.length).fill(0),
+      });
+    }
+    const i = idxOf.get(r.day);
+    if (i == null) continue;
+    const s = byUser.get(r.user_id);
+    s.calls[i] = r.calls;
+    s.prompt_chars[i] = r.prompt_chars;
+    s.completion_chars[i] = r.completion_chars;
+  }
+  const series = [...byUser.values()].sort(
+    (a, b) => b.calls.reduce((x, y) => x + y, 0) - a.calls.reduce((x, y) => x + y, 0),
+  );
+  return { days: axis, series };
 }
 
 export default async function adminUserRoutes(fastify) {
@@ -263,6 +303,7 @@ export default async function adminUserRoutes(fastify) {
       daily: usageDaily(days),
       by_user: usageByUser(),
       by_provider: usageByProvider(),
+      users_daily: usersDailySeries(days),
       days,
     };
   });

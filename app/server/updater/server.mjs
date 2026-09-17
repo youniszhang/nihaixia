@@ -33,6 +33,9 @@ const state = {
   finishedAt: null,
   localCommit: null,
   remoteCommit: null,
+  checking: false,
+  checkedAt: null,
+  checkError: null,
   log: [],
 };
 
@@ -64,6 +67,28 @@ async function detectCompose() {
 
 async function currentCommit(ref = 'HEAD') {
   try { return await run('git', ['rev-parse', '--short', ref]); } catch { return null; }
+}
+
+// 实时读取版本：本地 HEAD 总是现读（便宜）；远端要 git fetch 才知道有没有新提交，
+// 只在显式要求（check=true）时执行 —— 打开「系统更新」页就会触发一次，
+// 这样版本号不会像以前那样永远是「—」（此前只在部署时才写入内存）。
+async function refreshVersions({ check = false } = {}) {
+  state.localCommit = await currentCommit();
+  if (!check || state.checking) return;
+  state.checking = true;
+  state.checkError = null;
+  try {
+    await run('git', ['fetch', 'origin', `+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}`, '--prune'], { timeout: 30000 });
+    state.remoteCommit = await currentCommit(`origin/${BRANCH}`);
+  } catch (err) {
+    state.checkError = err.killed
+      ? '拉取远端版本超时（30 秒），服务器访问 GitHub 可能较慢'
+      : (err.stderr || err.message || String(err)).toString().slice(0, 300);
+    // fetch 失败（服务器网络不通 GitHub 等）时不要清空上次结果，页面照旧显示旧值 + 报错
+  } finally {
+    state.checking = false;
+    state.checkedAt = new Date().toISOString();
+  }
 }
 
 async function doUpdate() {
@@ -170,6 +195,9 @@ const server = createServer(async (req, res) => {
   if (url === '/health') return send(res, 200, { ok: true });
 
   if (url === '/status') {
+    // check=1 时实时 git fetch 拉取远端版本（页面打开/点「检查更新」用）
+    const check = /(?:^|&)check=1(?:&|$)/.test(req.url.split('?')[1] || '');
+    await refreshVersions({ check });
     return send(res, 200, {
       running: state.running,
       ok: state.ok,
@@ -177,6 +205,11 @@ const server = createServer(async (req, res) => {
       message: state.message,
       localCommit: state.localCommit,
       remoteCommit: state.remoteCommit,
+      updateAvailable:
+        state.localCommit && state.remoteCommit ? state.localCommit !== state.remoteCommit : null,
+      checking: state.checking,
+      checkedAt: state.checkedAt,
+      checkError: state.checkError,
       startedAt: state.startedAt,
       finishedAt: state.finishedAt,
       log: state.log.slice(-40),

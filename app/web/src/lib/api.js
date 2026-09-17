@@ -66,7 +66,8 @@ export const api = {
   inAppLoginStatus: () => request('/api/admin/dsweb/in-app-login-status'),
 
   // 系统更新（服务器一键部署）
-  systemStatus: () => request('/api/system/status'),
+  // check=true 时让服务端实时 git fetch 拉取远端版本（打开页面 / 点「检查更新」）
+  systemStatus: (check = false) => request(`/api/system/status${check ? '?check=1' : ''}`),
   systemUpdate: () => request('/api/system/update', { method: 'POST' }),
   systemRestart: () => request('/api/system/restart', { method: 'POST' }),
 

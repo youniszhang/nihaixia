@@ -1,36 +1,46 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 
-// 服务器一键更新：检查更新 → 拉取并部署 → 轮询状态
+// 服务器一键更新：打开即检查更新（实时 git fetch）→ 拉取并部署 → 轮询状态
 export default function SystemUpdate({ onClose }) {
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const pollRef = useRef(null);
 
-  async function loadStatus() {
+  // check=true 时服务端会实时 git fetch（几秒），期间给「检查中…」反馈
+  async function loadStatus(check = false) {
+    if (check) setChecking(true);
     try {
-      const d = await api.systemStatus();
+      const d = await api.systemStatus(check);
       setStatus(d);
       if (d.enabled === false) setMsg(d.message || '未启用一键更新');
       return d;
     } catch (e) {
       setErr(e.message || '获取状态失败');
       return null;
+    } finally {
+      if (check) setChecking(false);
     }
   }
 
   useEffect(() => {
-    loadStatus();
+    // 打开页面就检查一次远端版本（此前版本号永远是「—」，因为只在部署时才写入内存）
+    loadStatus(true);
     return () => clearInterval(pollRef.current);
   }, []);
 
   function startPolling() {
     clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
-      const d = await loadStatus();
-      if (!d?.running) clearInterval(pollRef.current);
+      const d = await loadStatus(false);
+      if (!d?.running) {
+        clearInterval(pollRef.current);
+        // 部署结束后再拉一次远端（部署后本地版本已变，顺便刷新对比）
+        setTimeout(() => loadStatus(true), 1500);
+      }
     }, 4000);
   }
 
@@ -40,7 +50,7 @@ export default function SystemUpdate({ onClose }) {
       const r = await api.systemUpdate();
       setMsg(r.message || '部署已启动');
       startPolling();
-      setTimeout(loadStatus, 2500);
+      setTimeout(() => loadStatus(false), 2500);
     } catch (e) {
       setErr(e.message || '启动失败');
     } finally { setBusy(false); }
@@ -52,7 +62,7 @@ export default function SystemUpdate({ onClose }) {
       const r = await api.systemRestart();
       setMsg(r.message || '重启已启动');
       startPolling();
-      setTimeout(loadStatus, 2500);
+      setTimeout(() => loadStatus(false), 2500);
     } catch (e) {
       setErr(e.message || '启动失败');
     } finally { setBusy(false); }
@@ -60,6 +70,7 @@ export default function SystemUpdate({ onClose }) {
 
   const running = status?.running;
   const s = status || {};
+  const upd = s.updateAvailable;
 
   return (
     <div className="sheet-form">
@@ -73,19 +84,54 @@ export default function SystemUpdate({ onClose }) {
       ) : (
         <>
           <div className="sys-grid">
-            <div><span>本地版本</span><code>{s.localCommit || '—'}</code></div>
-            <div><span>远端版本</span><code>{s.remoteCommit || '—'}</code></div>
-            <div><span>状态</span><strong className={running ? 'sys-running' : ''}>{running ? '部署中…' : (s.ok === true ? '上次部署成功' : s.ok === false ? '上次部署失败' : '就绪')}</strong></div>
+            <div>
+              <span>本地版本</span>
+              <code title={s.localCommit || ''}>{s.localCommit || '—'}</code>
+            </div>
+            <div>
+              <span>远端版本</span>
+              <code title={s.remoteCommit || ''}>{checking ? '检查中…' : (s.remoteCommit || '—')}</code>
+            </div>
+            <div>
+              <span>更新状态</span>
+              <strong className={upd ? 'sys-has-update' : ''}>
+                {checking ? '检查中…'
+                  : upd === true ? '有新版本可部署'
+                  : upd === false ? '已是最新'
+                  : '未知'}
+              </strong>
+            </div>
+            <div>
+              <span>运行状态</span>
+              <strong className={running ? 'sys-running' : ''}>
+                {running ? '部署中…' : (s.ok === true ? '上次部署成功' : s.ok === false ? '上次部署失败' : '就绪')}
+              </strong>
+            </div>
           </div>
 
-          {s.message && <p className={s.ok === false ? 'auth-error' : 'sheet-msg'}>{s.message}</p>}
+          {upd === true && !running && (
+            <p className="sys-update-tip">
+              远端有新提交（{s.localCommit || '?'} → {s.remoteCommit || '?'}），点「拉取并部署」即可上线。
+            </p>
+          )}
+          {s.checkError && <p className="auth-error">检查远端版本失败：{s.checkError}</p>}
+          {!s.checkError && s.checkedAt && !checking && (
+            <p className="admin-hint">远端版本核对于 {String(s.checkedAt).replace('T', ' ').slice(0, 19)}（UTC）</p>
+          )}
+
+          {/* 初始 message 就是「就绪」，与上面的运行状态重复，只在有实质状态时显示 */}
+          {s.message && (running || s.ok != null) && (
+            <p className={s.ok === false ? 'auth-error' : 'sheet-msg'}>{s.message}</p>
+          )}
 
           {s.log?.length > 0 && (
             <pre className="sys-log">{s.log.join('\n')}</pre>
           )}
 
           <div className="sheet-actions">
-            <button type="button" className="btn-ghost" onClick={loadStatus} disabled={running}>刷新状态</button>
+            <button type="button" className="btn-ghost" onClick={() => loadStatus(true)} disabled={checking || running}>
+              {checking ? '检查中…' : '检查更新'}
+            </button>
             <button type="button" className="btn-ghost" onClick={doRestart} disabled={busy || running}>仅重启服务</button>
             <button type="button" className="btn-primary" onClick={doUpdate} disabled={busy || running}>
               {running ? '部署中…' : '拉取并部署'}

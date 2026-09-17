@@ -136,5 +136,29 @@ console.log('other-sess');" 2>/dev/null)
 chk "读他人会话 404" "404" "$(curl -s -o /dev/null -w '%{http_code}' -b "$TMP/dev2.jar" "$B/sessions/other-sess")"
 
 echo
+echo "== 12. 用量报表：按用户每日调用量（折线图数据）=="
+# 造两天数据：invited_user 昨天 1 次、今天 2 次；root_admin 今天 1 次
+node --input-type=module -e "
+import { DatabaseSync } from 'node:sqlite';
+const db=new DatabaseSync(process.env.DB_PATH);
+const uid=(n)=>db.prepare('SELECT id FROM users WHERE username=?').get(n).id;
+const ins=db.prepare(\"INSERT INTO usage_log (user_id, provider, prompt_chars, completion_chars, created_at) VALUES (?,?,?,?,datetime('now', ?))\");
+ins.run(uid('invited_user'),'api',100,50,'-1 day');
+ins.run(uid('invited_user'),'api',200,60,'0 seconds');
+ins.run(uid('invited_user'),'api',300,70,'0 seconds');
+ins.run(uid('root_admin'),'dsweb',400,80,'0 seconds');
+db.close();" 2>/dev/null
+rep=$(curl -s -b "$TMP/admin.jar" "$B/admin/reports?days=3")
+chk "users_daily.days 长度=3" "3" "$(echo "$rep" | jqget 'len(d["users_daily"]["days"])')"
+chk "有 2 个用户序列" "2" "$(echo "$rep" | jqget 'len(d["users_daily"]["series"])')"
+chk "榜首是 invited_user" "invited_user" "$(echo "$rep" | jqget 'd["users_daily"]["series"][0]["username"]')"
+chk "榜首 calls 合计=3" "3" "$(echo "$rep" | jqget 'sum(d["users_daily"]["series"][0]["calls"])')"
+chk "calls 数组长度与日期轴一致" "3" "$(echo "$rep" | jqget 'len(d["users_daily"]["series"][0]["calls"])')"
+chk "前天 0 次（轴首日）" "0" "$(echo "$rep" | jqget 'd["users_daily"]["series"][0]["calls"][0]')"
+chk "昨日 1 次（补位正确）" "1" "$(echo "$rep" | jqget 'd["users_daily"]["series"][0]["calls"][1]')"
+chk "今日 2 次（轴末日）" "2" "$(echo "$rep" | jqget 'd["users_daily"]["series"][0]["calls"][-1]')"
+chk "非管理员读报表 403" "403" "$(curl -s -o /dev/null -w '%{http_code}' -b "$TMP/dev2.jar" "$B/admin/reports")"
+
+echo
 echo "===== 通过 $pass / 失败 $fail ====="
 [ "$fail" = "0" ]

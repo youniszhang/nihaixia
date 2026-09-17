@@ -1487,6 +1487,21 @@ body {
   margin-bottom: 12px;
 }
 
+/* 系统更新：有新版本可部署的提示与高亮 */
+.sys-has-update {
+  color: var(--red);
+}
+
+.sys-update-tip {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  font-size: 0.82rem;
+  color: var(--red);
+  background: rgba(176, 58, 46, 0.07);
+  border: 1px solid rgba(176, 58, 46, 0.22);
+  border-radius: var(--radius-sm);
+}
+
 /* ===== Disclaimer / warning ===== */
 .msg-tag {
   margin-top: 6px;
@@ -2222,6 +2237,57 @@ body {
   writing-mode: vertical-rl;
   transform: rotate(180deg);
   padding-bottom: 4px;
+}
+
+/* 按用户折线图（SVG 手绘，见 AdminReports.jsx UserLineChart） */
+.line-chart {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 12px 12px 10px;
+  min-height: 120px;
+  overflow-x: auto;
+}
+
+.line-chart .line-grid {
+  stroke: var(--border-light);
+  stroke-width: 1;
+}
+
+.line-chart .line-tick {
+  font-size: 0.62rem;
+  fill: var(--text-muted);
+}
+
+.line-chart .line-dot {
+  cursor: default;
+}
+
+.line-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 8px 4px 0;
+}
+
+.line-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.line-chip i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
 }
 
 @media (max-width: 768px) {

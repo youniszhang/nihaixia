@@ -510,6 +510,28 @@ export function usageByProvider() {
     FROM usage_log GROUP BY provider ORDER BY calls DESC`).all();
 }
 
+// 按用户 × 按天的调用量（折线图数据）。
+// 只取区间内调用量前 N 的用户，避免用户变多后线太乱、查询太重（参考 sub2api 的 top_users 做法）。
+export function usageUserDaily(days = 14, limit = 8) {
+  const since = `-${Number(days) - 1} days`;
+  return db.prepare(`
+    WITH top_users AS (
+      SELECT user_id FROM usage_log
+      WHERE date(created_at, 'localtime') >= date('now', 'localtime', ?)
+      GROUP BY user_id ORDER BY COUNT(*) DESC LIMIT ?
+    )
+    SELECT date(l.created_at, 'localtime') AS day,
+      l.user_id, u.username,
+      COUNT(*) AS calls,
+      COALESCE(SUM(l.prompt_chars),0) AS prompt_chars,
+      COALESCE(SUM(l.completion_chars),0) AS completion_chars
+    FROM usage_log l JOIN users u ON u.id = l.user_id
+    WHERE l.user_id IN (SELECT user_id FROM top_users)
+      AND date(l.created_at, 'localtime') >= date('now', 'localtime', ?)
+    GROUP BY day, l.user_id
+    ORDER BY day ASC, calls DESC`).all(since, Number(limit), since);
+}
+
 // ---------- profile ----------
 export function getProfile(userId) {
   return db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(userId) || null;
