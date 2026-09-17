@@ -66,8 +66,8 @@ export default function AdminSite() {
             <strong>允许新用户自行注册</strong>
             <p className="setting-desc">
               关闭后，登录页隐藏「注册」入口，注册接口也会拒绝请求；新账号只能由管理员在「用户管理」中创建。
-              {!site.registration_explicit && site.registration_enabled && (
-                <><br /><span className="setting-warn">当前为默认开放（兼容既有部署）。切换一次后会写入明确设置。</span></>
+              {!site.registration_explicit && !site.registration_enabled && (
+                <><br /><span className="setting-warn">当前为默认关闭。切换一次后会写入明确设置。</span></>
               )}
             </p>
           </div>

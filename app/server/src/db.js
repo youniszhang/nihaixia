@@ -168,15 +168,16 @@ function findUserByNameVar(name) {
 }
 
 // ---------- 注册开关 ----------
-// 优先级：数据库设置（后台在线切换）> REGISTRATION_ENABLED 环境变量 > 默认开放
-// 默认开放是为兼容既有部署；管理员可在后台「站点设置」关闭。
+// 优先级：数据库设置（后台在线切换）> REGISTRATION_ENABLED 环境变量 > 默认关闭
+// 默认关闭：本站不开放自助注册；账号由管理员在「用户管理」创建，或在「站点设置」
+// 临时开启注册（也可用 .env 的 REGISTRATION_ENABLED=true 显式开启）。
 export function isRegistrationOpen() {
   const stored = getSetting('registration_enabled');
   if (stored !== null) return stored !== 'false';
   const env = (process.env.REGISTRATION_ENABLED || '').trim().toLowerCase();
   if (env === 'false' || env === '0' || env === 'off') return false;
   if (env === 'true' || env === '1' || env === 'on') return true;
-  return true;
+  return false;
 }
 // 是否已显式设置过（区分默认值）
 export function registrationIsExplicit() {

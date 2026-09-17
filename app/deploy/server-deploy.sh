@@ -129,7 +129,24 @@ log "✅ api 容器 healthy"
 code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/sessions" 2>/dev/null || echo 000)"
 case "$code" in
   200|401) log "✅ Caddy → api 链路正常（/api/sessions → HTTP $code）" ;;
-  000)     log "❌ 无法连接 http://127.0.0.1:$PORT（web 容器未监听？）"; exit 1 ;;
+  000)
+    # 已发生过的事故：web（入口/Caddy）容器整个不在（被清理或重建失败），
+    # 此时整站 502 而 api 仍健康 —— 只重建入口容器即可恢复。
+    log "⚠️ 无法连接 http://127.0.0.1:$PORT，尝试重建入口容器 web…"
+    $DC up -d web 2>&1 | tail -5
+    for i in $(seq 1 12); do
+      sleep 5
+      code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/sessions" 2>/dev/null || echo 000)"
+      [ "$code" != "000" ] && break
+    done
+    if [ "$code" = "000" ]; then
+      log "❌ 入口容器 web 仍未监听 127.0.0.1:$PORT"
+      log "   请检查 .env 的 HTTP_PORT（当前 ${PORT}）以及该端口是否被占用："
+      $DC ps -a 2>&1 | tail -20
+      exit 1
+    fi
+    log "✅ 重建入口容器后链路恢复（/api/sessions → HTTP $code）"
+    ;;
   *)       log "⚠️ 反代链路异常（/api/sessions → HTTP $code），请检查 Caddy/防火墙"; exit 1 ;;
 esac
 

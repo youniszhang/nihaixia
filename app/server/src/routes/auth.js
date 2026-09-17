@@ -47,8 +47,10 @@ export default async function authRoutes(fastify) {
   });
 
   fastify.post('/login', rateOpts, async (req, reply) => {
+    // 登录不做格式校验（格式规则只在注册时生效）：历史账号、含特殊字符或
+    // 短口令的账号同样能登录，凭据正确与否由下面的查库 + 校验决定。
     const { username, password } = req.body || {};
-    if (!isValidUsername(username) || !isValidPassword(password)) {
+    if (typeof username !== 'string' || typeof password !== 'string' || !username.trim() || !password) {
       return sendError(reply, 'bad_credentials', '用户名或密码不正确', 401);
     }
     const user = findUserByName(username.trim());
