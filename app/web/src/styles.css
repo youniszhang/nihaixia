@@ -3199,13 +3199,13 @@ body {
 /* 数字输入 + 单位（「次」「天」）：两者同一行。
    此前单位单独占一行，配合 .invite-form 的 align-items:flex-end，
    会让「每码可用 / 有效期」比「生成数量」高出一行，输入框整体错位。 */
-.field-row {
+.field-input-unit {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.field-row input { width: 82px; }
+.field-input-unit input { width: 82px; }
 
 .field-inline input {
   padding: 8px 10px;
