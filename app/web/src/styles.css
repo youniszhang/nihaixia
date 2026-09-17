@@ -3182,3 +3182,15 @@ body {
 }
 
 .load-earlier .text-btn:hover:not(:disabled) { color: var(--red); border-color: var(--red); }
+
+/* ===== 历史会话加载中（避免闪一下空状态，像"回弹到新问诊"） ===== */
+.chat-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 80px 0;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+}

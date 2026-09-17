@@ -37,6 +37,7 @@ export default function ChatPage() {
   const RENDER_WINDOW = 60; // 同时渲染的消息上限（更早的折叠为「显示更早」）
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadingSession, setLoadingSession] = useState(false);
   const [renderAll, setRenderAll] = useState(false);
   const oldestIdRef = useRef(null);
 
@@ -50,6 +51,10 @@ export default function ChatPage() {
   const scrollHostRef = useRef(null);
   const listRef = useRef(sessions);
   listRef.current = sessions;
+  // 会话消息缓存：点历史先出内容再静默刷新，避免闪空状态（"看起来像弹回新问诊"）
+  const messageCacheRef = useRef(new Map());
+  const activeIdRef = useRef(null);
+  activeIdRef.current = activeId;
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -77,19 +82,50 @@ export default function ChatPage() {
   // ---- session selection ----
   async function openSession(id) {
     if (streaming) { abortRef.current?.abort(); setStreaming(false); }
+    // 已缓存则立即渲染，避免"点历史先闪一下空状态、看起来像弹回新问诊"
+    const cached = messageCacheRef.current.get(id);
     setActiveId(id);
-    setMessages([]);
-    setHasMore(false);
     setRenderAll(false);
+    setHasMore(false);
+    if (cached) {
+      setMessages(cached.messages);
+      setHasMore(cached.hasMore);
+      oldestIdRef.current = cached.messages[0]?.id ?? null;
+      setIntakeNote(cached.pin || '');
+      setSessionTitle(cached.title);
+      setLoadingSession(false);
+      setSidebarOpen(false);
+      // 后台静默刷新（拿到最新消息后替换），不阻塞、不闪屏
+      api.getSession(id, { limit: PAGE_SIZE }).then((d) => {
+        const list = d.messages || [];
+        messageCacheRef.current.set(id, {
+          messages: list, hasMore: Boolean(d.has_more), pin: d.session.pin || '', title: d.session.title,
+        });
+        if (activeIdRef.current === id) {
+          setMessages(list);
+          setHasMore(Boolean(d.has_more));
+          oldestIdRef.current = list[0]?.id ?? null;
+          setSessionTitle(d.session.title);
+        }
+      }).catch(() => {});
+      return;
+    }
+    setMessages([]);
+    setLoadingSession(true);
     try {
       // 只取最近一页：长会话（几百条 × 每条数 KB）全量返回 + 全量渲染是「点开历史很慢」的主因
       const data = await api.getSession(id, { limit: PAGE_SIZE });
-      setMessages(data.messages || []);
+      const list = data.messages || [];
+      messageCacheRef.current.set(id, {
+        messages: list, hasMore: Boolean(data.has_more), pin: data.session.pin || '', title: data.session.title,
+      });
+      setMessages(list);
       setHasMore(Boolean(data.has_more));
-      oldestIdRef.current = data.messages?.[0]?.id ?? null;
+      oldestIdRef.current = list[0]?.id ?? null;
       setIntakeNote(data.session.pin || '');
       setSessionTitle(data.session.title);
     } catch { /* ignore */ }
+    setLoadingSession(false);
     setSidebarOpen(false);
   }
 
@@ -194,10 +230,14 @@ export default function ChatPage() {
       // Refresh active session's persisted messages to reconcile ids
       // 只回填最近一页（刚发完的消息一定在这页里），避免长会话重新拉全量
       api.getSession(sid, { limit: PAGE_SIZE }).then((d) => {
-        setMessages(d.messages || []);
+        const list = d.messages || [];
+        setMessages(list);
         setHasMore(Boolean(d.has_more));
-        oldestIdRef.current = d.messages?.[0]?.id ?? null;
+        oldestIdRef.current = list[0]?.id ?? null;
         setSessionTitle(d.session.title);
+        messageCacheRef.current.set(sid, {
+          messages: list, hasMore: Boolean(d.has_more), pin: d.session.pin || '', title: d.session.title,
+        });
       }).catch(() => {});
     }
   }
@@ -258,7 +298,12 @@ export default function ChatPage() {
         </header>
 
         <div className="chat-scroll" ref={scrollHostRef}>
-          {messages.length === 0 && !streaming ? (
+          {loadingSession && messages.length === 0 ? (
+            <div className="chat-loading">
+              <div className="loading-spinner" />
+              <p>正在加载问诊记录…</p>
+            </div>
+          ) : messages.length === 0 && !streaming ? (
             <EmptyState onIntake={() => setShowIntake(true)} onNew={newSession} />
           ) : (
             <div className="msg-list">
