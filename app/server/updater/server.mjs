@@ -95,7 +95,15 @@ async function doUpdate() {
     state.message = '重建镜像并重启服务…';
     const [cmd, prefix] = await detectCompose();
     log(`${cmd} ${prefix.join(' ')} up -d --build ${SERVICES.join(' ')}`);
-    await run(cmd, [...prefix, '-f', COMPOSE_FILE, 'up', '-d', '--build', ...SERVICES]);
+    try {
+      await run(cmd, [...prefix, '-f', COMPOSE_FILE, 'up', '-d', '--build', ...SERVICES]);
+    } catch (err) {
+      // 已发生过的事故（2026-09-17）：compose 重建时报 "No such container: <id>"，
+      // 旧入口容器已删、新容器被丢弃 → 整站 502。这里补一次不带 --build 的 up 再复查。
+      log(`⚠️ 重建报错（${(err.stderr || err.message || err).toString().slice(0, 200)}），尝试单独补起入口容器…`);
+      await run(cmd, [...prefix, '-f', COMPOSE_FILE, 'up', '-d', ...SERVICES]);
+      log('↩  已执行补起，继续健康检查');
+    }
 
     state.stage = 'health';
     state.message = '健康检查…';

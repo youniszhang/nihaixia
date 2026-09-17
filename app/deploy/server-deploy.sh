@@ -84,6 +84,8 @@ fi
 log "✅ .env 就绪（$(wc -l < .env) 行）"
 
 # ---- 4. 构建 + 启动 ----
+PORT="$(grep -E '^HTTP_PORT=' .env 2>/dev/null | head -1 | cut -d= -f2)"
+PORT="${PORT:-18080}"
 log "▶ docker compose up -d --build（首次约 3-8 分钟）…"
 # 兼容旧版本遗留的固定容器名（nihaixia-updater）——先清掉，避免重建时撞名
 docker rm -f nihaixia-updater >/dev/null 2>&1 || true
@@ -95,8 +97,26 @@ else
 fi
 if [ "$rc" -ne 0 ]; then
   log "❌ 构建/启动失败（exit=$rc）"
-  $DC ps 2>&1 | tail -20
-  exit 1
+  # 已发生过的事故（2026-09-17 及此前多次）：compose 重建 web 时报
+  # "No such container: <id>" —— 旧容器已删、新容器被 docker 丢弃，
+  # 18080 无人监听，整站 502 且无人补救。这里单独补起 web 再复查。
+  log "↩  尝试单独补起入口容器 web…"
+  $DC up -d web 2>&1 | tail -5
+  code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/sessions" 2>/dev/null || echo 000)"
+  for i in $(seq 1 12); do
+    [ "$code" != "000" ] && break
+    sleep 5
+    code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/sessions" 2>/dev/null || echo 000)"
+  done
+  if [ "$code" = "000" ]; then
+    log "❌ 补起 web 后仍无法连接 http://127.0.0.1:$PORT"
+    $DC ps -a 2>&1 | tail -20
+    exit 1
+  fi
+  log "✅ 经自愈后链路恢复（/api/sessions → HTTP $code）"
+  $DC ps 2>&1 | tail -10
+  log "===== 部署成功（自愈） ====="
+  exit 0
 fi
 log "✅ 容器已启动"
 $DC ps 2>&1 | tail -10
@@ -105,8 +125,6 @@ $DC ps 2>&1 | tail -10
 # 注意：不能直接 curl /health —— Caddy 只代理 /api/*，/health 会落到 SPA 静态文件，
 # 永远返回 200（假阳性）。这里改为等 api 容器的 compose healthcheck 报告 healthy，
 # 再经 Caddy 请求一个真实 API 路径确认反代链路（未登录返回 401 即证明 api 有响应）。
-PORT="$(grep -E '^HTTP_PORT=' .env 2>/dev/null | head -1 | cut -d= -f2)"
-PORT="${PORT:-18080}"
 
 log "▶ 等待 api 容器 healthy…"
 ok=0

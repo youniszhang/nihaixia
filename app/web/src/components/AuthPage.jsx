@@ -81,11 +81,24 @@ export default function AuthPage() {
 
           <label className="field">
             <span>用户名</span>
-            <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder={mode === 'login' ? '用户名或邮箱' : '2-24 位中英文、数字或下划线，或邮箱'}
+              autoComplete="username"
+              required
+            />
           </label>
           <label className="field">
             <span>密码</span>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="至少 6 位" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={mode === 'login' ? '请输入密码' : '6-72 位'}
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              required
+            />
           </label>
           {mode === 'register' && (
             <label className="field">
