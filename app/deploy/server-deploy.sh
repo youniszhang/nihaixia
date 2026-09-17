@@ -70,7 +70,10 @@ if [ -n "${NIHAIXIA_ENV_B64:-}" ]; then
     log "🗄  已备份原 .env"
   fi
   printf '%s' "$NIHAIXIA_ENV_B64" | base64 -d > .env.tmp
-  for k in ADMIN_USERNAME REGISTRATION_ENABLED LLM_API_KEY LLM_BASE_URL LLM_MODEL; do
+  # HTTP_PORT / HTTPS_PORT 必须保留：部署会整体覆盖 .env，若内嵌的那份没写这俩，
+  # compose 会退回默认 80/443，与宝塔 nginx 抢端口 → web 容器起不来、整站不可用。
+  for k in ADMIN_USERNAME REGISTRATION_ENABLED LLM_API_KEY LLM_BASE_URL LLM_MODEL \
+           HTTP_PORT HTTPS_PORT DOMAIN UPDATER_TOKEN TZ; do
     env_preserve "$k"
   done
   mv .env.tmp .env

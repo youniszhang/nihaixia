@@ -81,6 +81,9 @@ export default function SystemUpdate({ onClose }) {
 
       {s.enabled === false ? (
         <p className="sheet-msg">{s.message}</p>
+      ) : s.error ? (
+        // updater 不可达（例如它正在自更新重建中，几秒内会恢复）
+        <p className="auth-error">{s.error}（若刚完成部署，属 updater 正在重建，稍后点「检查更新」重试）</p>
       ) : (
         <>
           <div className="sys-grid">

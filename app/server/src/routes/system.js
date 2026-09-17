@@ -15,12 +15,12 @@ function updaterCfg() {
   return { url, token, enabled: Boolean(url && token) };
 }
 
-async function callUpdater(path, method = 'GET') {
+async function callUpdater(path, method = 'GET', timeoutMs = 15000) {
   const { url, token } = updaterCfg();
   const res = await fetch(`${url}${path}`, {
     method,
     headers: { Authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const text = await res.text();
   let data;
@@ -38,9 +38,9 @@ export default async function systemRoutes(fastify) {
       return { enabled: false, message: '未启用一键更新（服务器需配置 UPDATER_URL / UPDATER_TOKEN）' };
     }
     try {
-      // check=1：让 updater 实时 git fetch，页面才能显示真实的远端版本
-      const q = req.query?.check === '1' ? '?check=1' : '';
-      const r = await callUpdater(`/status${q}`);
+      // check=1：让 updater 实时 git fetch（内部上限 30s），这里给足余量再超时
+      const check = req.query?.check === '1';
+      const r = await callUpdater(check ? '/status?check=1' : '/status', 'GET', check ? 40000 : 15000);
       return { enabled: true, ...(r.data || {}) };
     } catch (err) {
       return { enabled: true, error: `无法连接更新服务：${(err.message || err).slice(0, 160)}` };

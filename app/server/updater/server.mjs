@@ -65,6 +65,37 @@ async function detectCompose() {
   return composeCmd;
 }
 
+// updater 自身的镜像也要随代码更新（server.mjs 改了、容器不重建 → 新逻辑永远不生效）。
+// 但**不能在 updater 容器内**直接 `compose up updater`：compose 会先停掉本容器，
+// 命令半路夭折，updater 可能就此消失。交给一个 detached 的临时容器执行 ——
+// 它不在 compose 管理范围内，不受本容器生命周期影响。
+//
+// ⚠️ 卷不能用 `-v ${PROJECT_DIR}:...`：/workspace 只是本容器内的挂载点，
+// 宿主机上并不存在该路径（真实路径是 /root/nihaixia）。用 --volumes-from <自身>
+// 让临时容器继承同样的挂载（卷的 Source 由 daemon 解析，路径自然正确）。
+// 失败只记日志：此步在 web/api 部署成功之后，不该影响本次部署结论。
+async function scheduleSelfRebuild() {
+  const HELPER = 'nihaixia-updater-selfbuild';
+  try {
+    const self = process.env.HOSTNAME;
+    if (!self) throw new Error('拿不到容器 ID（HOSTNAME 为空）');
+    await run('docker', ['rm', '-f', HELPER]).catch(() => {});
+    await run('docker', [
+      'run', '-d', '--rm', '--name', HELPER,
+      // 基础镜像的 docker-entrypoint.sh 会把首参当 docker 子命令转发（同 Dockerfile 注释），
+      // 这里必须显式覆盖 entrypoint，否则 `sh` 会被当成 `docker sh` 执行
+      '--entrypoint', 'sh',
+      '--volumes-from', self,
+      '-w', PROJECT_DIR,
+      'docker:27-cli', '-c',
+      `docker compose -f ${COMPOSE_FILE} --profile updater up -d --build updater`,
+    ]);
+    log('🔁 已启动 updater 自更新（后台重建本容器，页面短暂无响应属正常，稍后自动恢复）');
+  } catch (err) {
+    log(`⚠️ updater 自更新启动失败（不影响本次部署）：${(err.stderr || err.message || err).toString().slice(0, 200)}`);
+  }
+}
+
 async function currentCommit(ref = 'HEAD') {
   try { return await run('git', ['rev-parse', '--short', ref]); } catch { return null; }
 }
@@ -147,6 +178,10 @@ async function doUpdate() {
     state.stage = 'done';
     state.message = '部署完成，健康检查已通过';
     log('✅ 部署完成');
+
+    // 最后把 updater 自己也重建到位（新逻辑要重建容器才生效）。
+    // 放在成功路径的最后：即使自更新失败，web/api 也已经部署成功。
+    await scheduleSelfRebuild();
   } catch (err) {
     state.ok = false;
     state.stage = 'failed';
