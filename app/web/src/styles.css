@@ -319,6 +319,16 @@ body {
   background: var(--bg);
 }
 
+/* 内联 SVG 图标的基类：<Icon> 统一输出 svg.icon。
+   这两条兜底的是同一类错位——此前 .icon 没有任何样式，于是
+   ① 行内混排在文字里的图标按基线对齐，视觉上整体偏高（小节标题、提示语里的图标）；
+   ② 作为 flex 子项时默认 flex-shrink:1，窄容器里图标会被压扁变形。
+   尺寸与颜色由组件属性控制，这里只管布局。 */
+.icon {
+  flex: none;
+  vertical-align: middle;
+}
+
 .icon-btn {
   background: none;
   border: none;
@@ -331,6 +341,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex: none;
   width: 36px;
   height: 36px;
 }
@@ -348,6 +359,11 @@ body {
   padding: 4px 8px;
   border-radius: 6px;
   transition: background 0.2s, color 0.2s;
+  /* 有些文字按钮带图标（十问/舌象、邀请码的复制/停用/删除），需要同一行居中 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
 }
 
 .text-btn:hover {
@@ -472,6 +488,10 @@ body {
   border-radius: 4px;
   opacity: 0;
   transition: opacity 0.15s, background 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
 }
 
 .session-item:hover .session-del {
@@ -500,6 +520,10 @@ body {
   text-align: left;
   transition: background 0.15s, color 0.15s;
   margin-bottom: 8px;
+  /* 与后台导航同理：图标和文字要在同一行、垂直居中 */
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .side-link:hover {
@@ -544,6 +568,10 @@ body {
   padding: 4px 8px;
   border-radius: 4px;
   transition: background 0.15s, color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
 }
 
 .side-logout:hover {
@@ -599,6 +627,10 @@ body {
   cursor: pointer;
   margin-top: 2px;
   transition: opacity 0.2s;
+  /* 徽标里是「图标 + 文字 + 图标」，需要同一行居中 */
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .pin-chip:hover {
@@ -994,6 +1026,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex: none;
   transition: background 0.2s, transform 0.15s;
 }
 
@@ -1734,6 +1767,10 @@ body {
 .admin-header h1 {
   font-size: 1.05rem;
   font-weight: 700;
+  /* 标题带当前栏目的图标，需与文字一行居中 */
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .admin-body {
@@ -1881,6 +1918,11 @@ body {
   cursor: pointer;
   color: var(--text-dim);
   font-size: 0.75rem;
+  /* 纯图标按钮：不设内联居中时，SVG 会压在行盒基线上、图标视觉偏上 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
 /* 表格 */
@@ -2021,6 +2063,10 @@ body {
 .admin-modal h3 {
   font-size: 1rem;
   margin-bottom: 14px;
+  /* 弹窗标题带图标（额度与订阅…）时与文字一行居中 */
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .admin-modal-wide {
@@ -2183,6 +2229,10 @@ body {
   margin-bottom: 10px;
   color: var(--text-dim);
   font-weight: 600;
+  /* 小节标题普遍带图标（每日签到 / 订阅套餐 / 邀请码…），图标与文字一行居中 */
+  display: flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .range-btns {
