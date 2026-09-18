@@ -5,7 +5,7 @@ import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import config from './config.js';
 import { createAuthenticate } from './lib/auth.js';
-import { configuredAdminUsername, configuredAdminExists, findCaseCollisions } from './db.js';
+import { configuredAdminUsername, configuredAdminExists, findCaseCollisions, getSetting } from './db.js';
 import authRoutes from './routes/auth.js';
 import sessionRoutes from './routes/sessions.js';
 import chatRoutes from './routes/chat.js';
@@ -150,6 +150,29 @@ export async function startServer() {
       if (isAdminClash) app.log.error(msg); else app.log.warn(msg);
     }
   } catch { /* 自检失败不影响启动 */ }
+  // 模型通道自检（2026-09-18 加）：本项目历史上栽过两次——
+  //   ① 联调时把 llm_base_url 指向本机 mock（localhost:9099），联调结束没清掉，
+  //      之后每次对话都是「无法连接模型服务」，用户只能看到错误编号；
+  //   2 用占位 key（test-xxx）当真实 key 写进 .env，表现为 401 鉴权失败。
+  // 这两类都能在启动时一眼看出来，所以在这里显式告警。
+  try {
+    const baseUrl = getSetting('llm_base_url') || config.llm.baseUrl || '';
+    const apiKey = getSetting('llm_api_key') || config.llm.apiKey || '';
+    const provider = getSetting('llm_provider') === 'dsweb' ? 'dsweb' : 'api';
+    if (provider === 'api') {
+      if (/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:|\/|$)/i.test(baseUrl)) {
+        app.log.warn(
+          `模型通道指向本机地址（${baseUrl}）——如果是联调用的 mock 服务，请确认它仍在运行；`
+          + '否则请在「模型设置」中改回真实服务地址。',
+        );
+      }
+      if (apiKey && /^(test|sk-test|your|xxx|placeholder|demo)/i.test(apiKey)) {
+        app.log.warn('模型 API Key 看起来是占位值（以 test/your/xxx 等开头）——对话会返回鉴权失败，请在「模型设置」中填写真实 Key。');
+      }
+      if (!apiKey) app.log.warn('未配置模型 API Key —— 对话将不可用（可在管理后台「模型设置」配置，或改用网页版 DeepSeek 通道）。');
+    }
+  } catch { /* 自检失败不影响启动 */ }
+
   // 安全提示：未配置 APP_SECRET 时每次重启都会换密钥（会话失效）——生产必须配置
   if (!process.env.APP_SECRET) {
     app.log.warn('APP_SECRET 未配置：本次使用随机临时密钥，重启后所有登录态失效。生产环境请在 .env 中配置。');
