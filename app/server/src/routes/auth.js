@@ -1,7 +1,7 @@
 import {
   createUser, findUserByName, findUserByNameCI, isReservedAdminName, findUserById, deleteUser,
   getSetting, setSetting, isAdminUser, touchLogin,
-  registrationAllowed, registrationRequiresBootstrap, configuredAdminUsername, applyDefaultCredits,
+  registrationAllowed, registrationRequiresBootstrap, configuredAdminUsername, applyDefaultCredits, applyDefaultModules,
   checkInviteCode, consumeInviteCode, inviteRequired, bumpTokenVersion,
 } from '../db.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
@@ -90,6 +90,8 @@ export default async function authRoutes(fastify) {
 
     // 开户额度：站点设了 default_credits 才生效（留空 = 不限次）
     try { applyDefaultCredits(user.id); } catch { /* 开户失败不影响注册 */ }
+    // 默认模块权限（站点设置 default_modules，默认只有中医）：显式发牌，后台可见可撤销
+    try { applyDefaultModules(user.id); } catch { /* 发牌失败不影响建号 */ }
     touchLogin(user.id);
     const token = issueToken(user);
     reply.setCookie('nhx_token', token, cookieOptions);

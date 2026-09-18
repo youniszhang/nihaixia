@@ -24,12 +24,14 @@ export default function AdminModules({ onOpenUserPicker }) {
   const [bulkFor, setBulkFor] = useState(null);     // 批量开通弹窗的模块
   const [bulkIds, setBulkIds] = useState('');
   const [showHistory, setShowHistory] = useState(false);
+  const [defaultModules, setDefaultModules] = useState([]);
 
   async function load() {
     try {
       const d = await api.adminModules();
       setModules(d.modules || []);
       setRequests(d.requests || []);
+      setDefaultModules(d.default_modules || []);
     } catch (e) { setErr(e.message); }
   }
   useEffect(() => { load(); }, []);
@@ -42,6 +44,17 @@ export default function AdminModules({ onOpenUserPicker }) {
       const r = await api.adminPatchModule(id, patchBody);
       flash(okText || `已保存：${(r.changes || []).join('；')}`);
       await load();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  }
+
+  // 保存新用户默认模块（选项即改即存）
+  async function saveDefaultModules(ids) {
+    setBusy(true); setErr('');
+    try {
+      const r = await api.adminDefaultModules(ids);
+      setDefaultModules(r.default_modules || []);
+      flash(`默认模块已更新：${(r.default_modules || []).map((id) => modules.find((m) => m.id === id)?.name || id).join('、') || '（无）'}`);
     } catch (e) { setErr(e.message); }
     finally { setBusy(false); }
   }
@@ -137,6 +150,32 @@ export default function AdminModules({ onOpenUserPicker }) {
         )}
       </div>
 
+      {/* 新用户默认模块：注册/建号时自动开通哪些（默认只有中医） */}
+      <div className="card">
+        <div className="card-head">
+          <h3><Icon name="user-plus" size={16} /> 新用户默认模块</h3>
+          <span className="chip">{(defaultModules || []).length} 个</span>
+        </div>
+        <p className="card-sub">
+          新建用户（注册或后台建号）自动开通这些模块。默认只开「岐黄问诊」；改动只影响之后新建的账号，
+          已存在的账号请在下方逐个/批量开通。
+        </p>
+        <div className="module-picker">
+          {modules.map((m) => {
+            const on = (defaultModules || []).includes(m.id);
+            return (
+              <label key={m.id} className={`module-pick ${on ? 'on' : ''}`} style={{ '--mc': m.color }}>
+                <input type="checkbox" checked={on} disabled={busy}
+                  onChange={(e) => saveDefaultModules(
+                    e.target.checked ? [...(defaultModules || []), m.id] : (defaultModules || []).filter((x) => x !== m.id),
+                  )} />
+                <Icon name={m.icon} size={13} /> {m.name}
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
       {/* 模块列表 */}
       {modules.map((m) => (
         <div className="card" key={m.id}>
@@ -190,12 +229,18 @@ export default function AdminModules({ onOpenUserPicker }) {
                 <p className="empty-hint">还没有用户开通此模块。</p>
               ) : (
                 <table className="admin-table module-table">
-                  <thead><tr><th>用户 ID</th><th>用户名</th><th>开通时间</th><th>操作人</th><th></th></tr></thead>
+                  <thead><tr><th>用户 ID</th><th>用户名</th><th>来源</th><th>到期</th><th>开通时间</th><th>操作人</th><th></th></tr></thead>
                   <tbody>
                     {(moduleUsers[m.id] || []).map((u) => (
                       <tr key={u.id}>
                         <td>#{u.id}</td>
                         <td>{u.username}</td>
+                        <td>
+                          <span className={`chip ${u.source === 'plan' ? 'chip-warn' : ''}`}>
+                            {u.source === 'plan' ? '订阅' : u.source === 'default' ? '默认' : '手动'}
+                          </span>
+                        </td>
+                        <td className="td-dim">{u.expires_at ? String(u.expires_at).slice(0, 10) : '永久'}</td>
                         <td>{fmtTime(u.granted_at)}</td>
                         <td>{u.granted_by || '—'}</td>
                         <td className="td-actions">

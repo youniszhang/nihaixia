@@ -14,7 +14,7 @@ import {
   usageSummary, usageDaily, usageByUser, usageByProvider, usageUserDaily,
   bulkSetUserStatus, bulkDeleteUsers, addAudit, listAudit,
   registrationAllowed, registrationIsExplicit, configuredAdminUsername, isAdminIdentity,
-  setUserCredits, setUserDailyLimit, getUserCredits, resolveQuota, applyDefaultCredits,
+  setUserCredits, setUserDailyLimit, getUserCredits, resolveQuota, applyDefaultCredits, applyDefaultModules,
   listPlans, getPlan, createPlan, updatePlan, deletePlan,
   listSubscriptions, subscriptionStats, approveSubscription, rejectSubscription,
   cancelSubscriptionById, applySubscription, pendingSubscription, expireSubscriptions,
@@ -23,8 +23,9 @@ import {
   // 玄枢模块管理
   getModuleSiteEnabled, setModuleSiteEnabled, listUserModules,
   grantUserModule, revokeUserModule, bulkGrantUserModule, listModuleUsers,
+  getDefaultModules, setDefaultModules, parseModuleIds,
 } from '../db.js';
-import { MODULES, getModule } from '../modules/registry.js';
+import { MODULES, MODULE_IDS, getModule } from '../modules/registry.js';
 import { listModuleRequests } from './modules.js';
 import { hashPassword } from '../lib/password.js';
 import { isValidUsername, isValidPassword, sendError, clamp } from '../lib/validate.js';
@@ -148,6 +149,8 @@ export default async function adminUserRoutes(fastify) {
     if (note != null) setUserNote(user.id, clamp(String(note), 200));
     // 新用户默认额度（站点设置 default_credits；留空 = 不限次）
     try { applyDefaultCredits(user.id); } catch { /* 开户失败不影响创建 */ }
+    // 默认模块权限（站点设置 default_modules，默认只有中医）：显式发牌，后台可见可撤销
+    try { applyDefaultModules(user.id); } catch { /* 发牌失败不影响建号 */ }
     addAudit({ actor: req.user, action: 'user.create', target: name, detail: '管理员创建账号' });
     return reply.code(201).send({ user: listUsersWithStats().find((u) => u.id === user.id) || findUserById(user.id) });
   });
@@ -415,7 +418,10 @@ export default async function adminUserRoutes(fastify) {
   // ---------- 套餐（订阅计划） ----------
   fastify.get('/plans', admin, async (req, reply) => {
     if (!requireAdmin(req, reply)) return;
-    return { plans: listPlans({ includeInactive: true }) };
+    // 附 modules 数组，前台编辑套餐时直接回显勾选状态
+    return {
+      plans: listPlans({ includeInactive: true }).map((p) => ({ ...p, modules: parseModuleIds(p.modules) })),
+    };
   });
 
   fastify.post('/plans', admin, async (req, reply) => {
@@ -431,6 +437,7 @@ export default async function adminUserRoutes(fastify) {
       credits: req.body?.credits,
       sort: req.body?.sort,
       active: req.body?.active !== false,
+      modules: req.body?.modules,
     });
     addAudit({ actor: req.user, action: 'plan.create', target: plan.name, detail: `${plan.period_days} 天 · ${plan.credits} 次额度 · 每日上限 ${plan.daily_chat_limit || '不限'}` });
     return reply.code(201).send({ plan });
@@ -626,7 +633,27 @@ export default async function adminUserRoutes(fastify) {
         pending_requests: requests.filter((r) => r.module_id === m.id).length,
       };
     });
-    return { modules, requests };
+    return {
+      modules,
+      requests,
+      // 新用户默认拿到的模块（站点设置，默认 ['tcm']）
+      default_modules: getDefaultModules(),
+    };
+  });
+
+  // 站点默认模块（新建用户自动开通哪些）
+  fastify.put('/modules-defaults', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const raw = req.body?.modules;
+    const ids = Array.isArray(raw) ? raw : String(raw || '').split(',');
+    const valid = ids.map((x) => String(x).trim()).filter((x) => MODULE_IDS.includes(x));
+    setDefaultModules(valid);
+    addAudit({
+      actor: req.user, action: 'module.defaults',
+      target: valid.map((id) => getModule(id)?.name || id).join('、') || '（空）',
+      detail: '更新新用户默认模块',
+    });
+    return { ok: true, default_modules: getDefaultModules() };
   });
 
   // 模块站点开关 / 申请模式

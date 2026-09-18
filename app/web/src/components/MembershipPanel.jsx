@@ -197,6 +197,27 @@ export default function MembershipPanel({ onClose, onQuotaChange }) {
         )}
       </section>
 
+      {/* ---------- 我的模块权限（按模块区分，标注来源与到期） ---------- */}
+      <section className="admin-section">
+        <h3><Icon name="sparkles" size={16} /> 我的模块权限</h3>
+        {(subs.my_modules || []).length === 0 ? (
+          <p className="setting-desc">当前没有任何模块权限，可在下方套餐或门户中申请。</p>
+        ) : (
+          <div className="my-modules">
+            {subs.my_modules.map((m) => (
+              <span key={m.id} className="my-module-chip" style={{ '--mc': m.color }}>
+                <Icon name={m.icon} size={13} /> {m.name}
+                <small>
+                  {m.source === 'plan'
+                    ? `订阅${m.expires_at ? ' · 至 ' + String(m.expires_at).slice(0, 10) : ''}`
+                    : m.source === 'default' ? '默认开通' : '已开通'}
+                </small>
+              </span>
+            ))}
+          </div>
+        )}
+      </section>
+
       {/* ---------- 订阅套餐 ---------- */}
       <section className="admin-section">
         <h3><Icon name="card" size={16} /> 订阅套餐</h3>
@@ -225,6 +246,21 @@ export default function MembershipPanel({ onClose, onQuotaChange }) {
                     <li><Icon name="credit-limit" size={14} /> 每日上限 {p.daily_chat_limit > 0 ? `${p.daily_chat_limit} 次` : '不限'}</li>
                     <li><Icon name="clock" size={14} /> 有效期 {p.period_days} 天</li>
                   </ul>
+                  {/* 这个套餐买到哪些模块的权限 —— 各模块单独开通，必须写清楚 */}
+                  <div className="plan-modules">
+                    <span className="plan-modules-label">含模块权限</span>
+                    {(p.modules_detail || []).length === 0 ? (
+                      <span className="plan-modules-none">不含模块权限（仅额度）</span>
+                    ) : (
+                      <span className="plan-modules-list">
+                        {p.modules_detail.map((m) => (
+                          <span key={m.id} className="plan-module-chip" style={{ '--mc': m.color }}>
+                            <Icon name={m.icon} size={12} /> {m.name}
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                  </div>
                   <button
                     className={isCurrent ? 'btn-ghost' : 'btn-primary'}
                     onClick={() => applyPlan(p)}

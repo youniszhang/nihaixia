@@ -3837,3 +3837,156 @@ body {
 }
 
 .back-btn:hover { color: var(--red); }
+
+/* ===== 门户卡片：全量展示 + 无权限态（2026-09-18） =====
+   所有模块都渲染卡片；无权限的灰化并标「无权限」，未上线的标「暂未开放」。 */
+.module-card.locked .module-name,
+.module-card.locked .module-tagline { opacity: 0.75; }
+
+.module-card.offline { opacity: 0.72; }
+
+.module-lock-flag {
+  color: var(--text-dim) !important;
+  background: rgba(0, 0, 0, 0.06) !important;
+  margin-left: 7px;
+}
+
+/* 权限来源徽标（默认开通 / 已开通 / 订阅至 X） */
+.module-src {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  background: var(--bg-elevated);
+}
+
+.module-src.src-default { color: var(--jade); border-color: rgba(45, 138, 78, 0.3); background: rgba(45, 138, 78, 0.08); }
+.module-src.src-plan { color: var(--amber); border-color: rgba(184, 134, 11, 0.3); background: rgba(184, 134, 11, 0.09); }
+.module-src.src-manual { color: var(--text-dim); }
+.module-src.src-admin { color: var(--amber); border-color: rgba(184, 134, 11, 0.3); background: rgba(184, 134, 11, 0.09); }
+
+/* 可进入卡片的「进入」按钮（整卡可点，这里做成显式按钮更易发现） */
+.module-enter-btn {
+  margin-top: auto;
+  padding-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  padding-left: 0;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--mc);
+  cursor: pointer;
+}
+
+.module-enter-btn:hover:not(:disabled) { text-decoration: underline; }
+.module-enter-btn:disabled { opacity: 0.6; cursor: wait; }
+
+.module-lock-actions {
+  margin-top: auto;
+  padding-top: 8px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.module-apply.ghost {
+  border-style: dashed;
+}
+
+.module-lock-note {
+  margin-top: auto;
+  padding-top: 8px;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.portal-hero-hint { color: var(--text-muted); }
+
+/* ===== 订阅面板：模块权限区分（2026-09-18） ===== */
+.my-modules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.my-module-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.my-module-chip .icon { color: var(--mc); }
+
+.my-module-chip small { color: var(--text-muted); font-size: 0.7rem; }
+
+.plan-modules {
+  margin: 10px 0 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.plan-modules-label { font-size: 0.74rem; color: var(--text-muted); }
+
+.plan-modules-list { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.plan-module-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  color: #fff;
+  background: var(--mc);
+  opacity: 0.92;
+}
+
+.plan-modules-none { font-size: 0.76rem; color: var(--text-muted); }
+
+/* ===== 管理后台：套餐绑定模块的选择器（2026-09-18） ===== */
+.module-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.module-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  color: var(--text-dim);
+  background: var(--bg-card);
+  transition: all 0.15s;
+}
+
+.module-pick input { display: none; }
+
+.module-pick.on {
+  color: #fff;
+  background: var(--mc, var(--red));
+  border-color: var(--mc, var(--red));
+}
+
+.module-pick:hover { border-color: var(--mc, var(--red)); }

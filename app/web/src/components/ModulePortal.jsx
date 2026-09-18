@@ -3,21 +3,26 @@ import { api } from '../lib/api.js';
 import Icon from './Icon.jsx';
 
 // 玄枢 · 模块门户：登录后的首屏。
-// 每个模块 = 一位角色（人设+知识库+脚本）。点击可用模块进入聊天；不可用模块走开通流程。
+//
+// 展示策略（2026-09-18 起）：**所有模块都渲染成卡片**，无权限的卡片灰化并标明「无权限」，
+// 而不是把卡片藏起来——用户能看到"这里还有别的先生"，也才知道该开通/订阅什么。
+//   可用     → 点击进入
+//   无权限   → 显示锁 + 「无权限」，按开通方式给出「申请开通」/「一键开通」，含该模块的套餐则引导「去订阅」
+//   未上线   → 灰化 + 「暂未开放」（站点级开关关闭，连申请都无意义）
 //
 // props:
-//   user        — 当前用户
-//   catalog     — 模块目录（App 预取；为空数组时组件内自行加载兜底）
-//   onEnter     — (module) => void  进入某模块（ChatPage 用它预创建/绑定会话）
-//   onMembership — 额度入口
-//   onAdminConsole / onLogout — 侧边入口透传
+//   user          — 当前用户
+//   catalog       — 模块目录（App 预取；为空时组件内自行加载兜底）
+//   onEnter       — (module) => void
+//   onMembership  — 打开「我的额度 / 订阅」面板
+//   onAdminConsole / onLogout
 
 export default function ModulePortal({ user, catalog, onEnter, onMembership, onAdminConsole, onLogout }) {
   const [modules, setModules] = useState(catalog && catalog.length ? catalog : null);
   const [err, setErr] = useState('');
   const [busyId, setBusyId] = useState(null);
-  const [applyNote, setApplyNote] = useState('');     // 申请留言（当前仅单模块申请用）
-  const [applyFor, setApplyFor] = useState(null);     // 弹窗模块
+  const [applyNote, setApplyNote] = useState('');
+  const [applyFor, setApplyFor] = useState(null);
   const [notice, setNotice] = useState('');
 
   function load() {
@@ -37,24 +42,31 @@ export default function ModulePortal({ user, catalog, onEnter, onMembership, onA
     setBusyId(m.id);
     try {
       const r = await api.authorizeModule(m.id, applyNote);
+      setNotice(r.message);
+      setApplyFor(null); setApplyNote('');
       if (r.granted) {
-        setNotice(r.message);
-        await enter(m); // 开通即入
+        // 开通成功 → 直接进入（同时刷新目录，卡片状态同步）
+        await load();
+        await enter(m);
       } else {
-        setNotice(r.message);
-        setApplyFor(null); setApplyNote('');
         load();
       }
     } catch (e) { setErr(e.message); }
     finally { setBusyId(null); }
   }
 
-  // 视角：管理员是普通用户的超集 —— 所有模块都进「可进入」区（服务端 available=true），
-  // 未上线的只是多一个「仅管理员可见」标记；普通用户看到上线且已开通的，其余进待开通/下线区。
   const isAdmin = Boolean(user?.is_admin);
-  const available = (modules || []).filter((m) => m.available);
-  const locked = (modules || []).filter((m) => !m.available && m.site_enabled);
-  const offline = (modules || []).filter((m) => !m.site_enabled && !m.available);
+  const list = modules || [];
+  const myCount = list.filter((m) => m.available).length;
+
+  // 权限来源标签（可用卡片上的一条小提示）
+  function sourceLabel(m) {
+    if (m.admin_preview) return { text: '未上线（仅管理员可见）', cls: 'src-admin' };
+    if (m.grant_source === 'default') return { text: '默认开通', cls: 'src-default' };
+    if (m.grant_source === 'plan') return { text: `订阅中${m.grant_expires_at ? ' · 至 ' + String(m.grant_expires_at).slice(0, 10) : ''}`, cls: 'src-plan' };
+    if (m.grant_source === 'manual' || m.grant_source === 'auto') return { text: '已开通', cls: 'src-manual' };
+    return null;
+  }
 
   return (
     <div className="portal-shell">
@@ -86,7 +98,10 @@ export default function ModulePortal({ user, catalog, onEnter, onMembership, onA
       <main className="portal-main">
         <div className="portal-hero">
           <h1>玄枢 · 传统智慧 AI 工作台</h1>
-          <p>八位先生，各守一艺。命理排盘交给脚本，解读归于角色——过程透明，口径可查。</p>
+          <p>
+            八位先生，各守一艺。命理排盘交给脚本，解读归于角色——过程透明，口径可查。
+            {!isAdmin && <span className="portal-hero-hint">　你已开通 {myCount} / {list.length} 个模块，其余可按需开通或订阅。</span>}
+          </p>
         </div>
 
         {err && <p className="portal-error" role="alert">{err}</p>}
@@ -95,55 +110,62 @@ export default function ModulePortal({ user, catalog, onEnter, onMembership, onA
         {!modules ? (
           <div className="chat-loading"><div className="loading-spinner" /><p>正在加载模块…</p></div>
         ) : (
-          <>
-            <section className="module-grid">
-              {available.map((m) => (
-                <button key={m.id} className="module-card" style={{ '--mc': m.color }} onClick={() => enter(m)} disabled={busyId === m.id}>
-                  <span className="module-icon" style={{ background: m.color }}><Icon name={m.icon} size={26} /></span>
+          <section className="module-grid">
+            {list.map((m) => {
+              const locked = !m.available;
+              const offline = !m.site_enabled;
+              const src = m.available ? sourceLabel(m) : null;
+              const subPlan = (m.plans_with_module || [])[0];
+              return (
+                <div
+                  key={m.id}
+                  className={`module-card ${locked ? 'locked' : ''} ${offline && !isAdmin ? 'offline' : ''}`}
+                  style={{ '--mc': m.color }}
+                >
+                  <span className="module-icon" style={{ background: m.color, ...(locked ? { filter: 'grayscale(0.55)', opacity: 0.6 } : {}) }}>
+                    <Icon name={m.icon} size={26} />
+                  </span>
                   <span className="module-name">
                     {m.name}
-                    {m.admin_preview && <span className="module-admin-flag" title="该模块尚未对普通用户上线，仅管理员可见">未上线</span>}
+                    {locked && <span className="module-admin-flag module-lock-flag"><Icon name="lock" size={11} /> {offline ? '暂未开放' : '无权限'}</span>}
                   </span>
                   <span className="module-tagline">{m.tagline}</span>
+
                   {m.has_tool && <span className="module-tool"><Icon name="zap" size={12} /> {m.tool_name}</span>}
-                  <span className="module-enter">进入 <Icon name="arrow-right" size={14} /></span>
-                </button>
-              ))}
-            </section>
+                  {src && <span className={`module-src ${src.cls}`}>{src.text}</span>}
 
-            {isAdmin && (
-              <p className="portal-offline-hint">
-                管理员视角：全部 {available.length} 个模块均可进入；标「未上线」的尚未对普通用户开放，可在「管理后台 → 模块管理」中上线。
-              </p>
-            )}
-
-            {locked.length > 0 && (
-              <>
-                <h2 className="portal-subtitle">待开通模块</h2>
-                <section className="module-grid">
-                  {locked.map((m) => (
-                    <div key={m.id} className="module-card locked" style={{ '--mc': m.color }}>
-                      <span className="module-icon" style={{ background: m.color, filter: 'grayscale(0.7)', opacity: 0.55 }}>
-                        <Icon name={m.icon} size={26} />
-                      </span>
-                      <span className="module-name">{m.name}</span>
-                      <span className="module-tagline">{m.tagline}</span>
-                      <span className="module-lock"><Icon name="lock" size={13} /> {m.default_grant ? '' : '未开通'}</span>
-                      <button className="module-apply" disabled={busyId === m.id} onClick={() => (m.open_mode === 'auto' ? authorize(m) : setApplyFor(m))}>
+                  {!locked ? (
+                    <button className="module-enter-btn" onClick={() => enter(m)} disabled={busyId === m.id}>
+                      进入 <Icon name="arrow-right" size={14} />
+                    </button>
+                  ) : offline ? (
+                    <span className="module-lock-note">该模块尚未上线，敬请期待</span>
+                  ) : (
+                    <div className="module-lock-actions">
+                      <button
+                        className="module-apply"
+                        disabled={busyId === m.id}
+                        onClick={() => (m.open_mode === 'auto' ? authorize(m) : setApplyFor(m))}
+                      >
                         {m.open_mode === 'auto' ? '一键开通' : '申请开通'}
                       </button>
+                      {subPlan && onMembership && (
+                        <button className="module-apply ghost" onClick={onMembership} title={`套餐「${subPlan}」包含此模块`}>
+                          订阅开通
+                        </button>
+                      )}
                     </div>
-                  ))}
-                </section>
-              </>
-            )}
+                  )}
+                </div>
+              );
+            })}
+          </section>
+        )}
 
-            {offline.length > 0 && (
-              <p className="portal-offline-hint">
-                另有 {offline.length} 个模块（{offline.map((m) => m.name).join('、')}）暂未上线，敬请期待。
-              </p>
-            )}
-          </>
+        {isAdmin && (
+          <p className="portal-offline-hint">
+            管理员视角：全部 {list.length} 个模块均可进入；标「未上线」的尚未对普通用户开放，可在「管理后台 → 模块管理」中上线。
+          </p>
         )}
       </main>
 

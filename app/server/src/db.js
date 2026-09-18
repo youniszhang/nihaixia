@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import config from './config.js';
-import { MODULES } from './modules/registry.js';
+import { MODULES, MODULE_IDS } from './modules/registry.js';
 
 // defaultGrant 模块集合（中医）：站点开启即全员可用，无需逐个发牌
 const MODULE_DEFAULT_GRANTS = new Set(MODULES.filter((m) => m.defaultGrant).map((m) => m.id));
@@ -747,6 +747,26 @@ if (!tableColumns('sessions').includes('module')) {
   db.exec("ALTER TABLE sessions ADD COLUMN module TEXT NOT NULL DEFAULT ''");
 }
 
+// 模块权限与套餐打通（老库补列，幂等）：
+//   plans.modules / subscriptions.modules   —— 套餐携带哪些模块（逗号分隔 id；订阅时快照）
+//   user_modules.source/plan_id/expires_at  —— 区分「管理员手动开通」与「订阅发放」，订阅型可到期失效
+if (!tableColumns('plans').includes('modules')) {
+  db.exec("ALTER TABLE plans ADD COLUMN modules TEXT NOT NULL DEFAULT ''");
+}
+if (!tableColumns('subscriptions').includes('modules')) {
+  db.exec("ALTER TABLE subscriptions ADD COLUMN modules TEXT NOT NULL DEFAULT ''");
+}
+const umCols = tableColumns('user_modules');
+if (!umCols.includes('source')) {
+  db.exec("ALTER TABLE user_modules ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'");
+}
+if (!umCols.includes('plan_id')) {
+  db.exec('ALTER TABLE user_modules ADD COLUMN plan_id INTEGER');
+}
+if (!umCols.includes('expires_at')) {
+  db.exec('ALTER TABLE user_modules ADD COLUMN expires_at TEXT');
+}
+
 // 数字型站点设置的读取（空串/未设置 → 默认值）
 function numSetting(key, def = 0) {
   const raw = getSetting(key);
@@ -939,9 +959,21 @@ export function getDefaultCredits() {
 }
 
 // ---------- 订阅 ----------
+// 套餐可携带「模块权限」：modules 存逗号分隔的模块 id（快照进 subscriptions，避免改套餐追溯影响老订阅）。
+// 订阅发放的模块权限写进 user_modules（source='plan' + expires_at），到期自动失效。
 export function expireSubscriptions() {
   const r = db.prepare(`UPDATE subscriptions SET status = 'expired', updated_at = datetime('now')
     WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at <= datetime('now')`).run();
+  return r.changes || 0;
+}
+
+// 清理已到期的订阅型模块权限（手动开通的不动）。
+// 读路径（模块判定 / 开通列表）都会调用，不依赖定时任务。
+export function revokeExpiredModuleGrants(userId = null) {
+  const sql = `DELETE FROM user_modules
+    WHERE source = 'plan' AND expires_at IS NOT NULL AND expires_at <= datetime('now')`
+    + (userId != null ? ' AND user_id = ?' : '');
+  const r = userId != null ? db.prepare(sql).run(userId) : db.prepare(sql).run();
   return r.changes || 0;
 }
 
@@ -984,9 +1016,9 @@ export function getPlan(id) {
   return db.prepare('SELECT * FROM plans WHERE id = ?').get(id) || null;
 }
 
-export function createPlan({ name, description = '', priceCents = 0, periodDays = 30, dailyChatLimit = 0, credits = 0, sort = 0, active = true }) {
-  const r = db.prepare(`INSERT INTO plans (name, description, price_cents, period_days, daily_chat_limit, credits, sort, active)
-    VALUES (?,?,?,?,?,?,?,?)`).run(
+export function createPlan({ name, description = '', priceCents = 0, periodDays = 30, dailyChatLimit = 0, credits = 0, sort = 0, active = true, modules = [] }) {
+  const r = db.prepare(`INSERT INTO plans (name, description, price_cents, period_days, daily_chat_limit, credits, sort, active, modules)
+    VALUES (?,?,?,?,?,?,?,?,?)`).run(
     String(name).slice(0, 40), String(description).slice(0, 200),
     Math.max(0, Math.floor(Number(priceCents) || 0)),
     Math.min(Math.max(Math.floor(Number(periodDays) || 30), 1), 3650),
@@ -994,8 +1026,27 @@ export function createPlan({ name, description = '', priceCents = 0, periodDays 
     Math.max(0, Math.floor(Number(credits) || 0)),
     Math.floor(Number(sort) || 0),
     active ? 1 : 0,
+    normalizeModuleIds(modules),
   );
   return getPlan(Number(r.lastInsertRowid));
+}
+
+// 模块 id 列表 → 逗号串（只保留注册表里存在的模块，去重、保序）
+function normalizeModuleIds(modules) {
+  const raw = Array.isArray(modules) ? modules : String(modules || '').split(',');
+  const seen = new Set();
+  const out = [];
+  for (const m of raw) {
+    const id = String(m).trim();
+    if (!id || seen.has(id) || !MODULE_IDS.includes(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out.join(',');
+}
+
+export function parseModuleIds(str) {
+  return String(str || '').split(',').map((s) => s.trim()).filter(Boolean);
 }
 
 export function updatePlan(id, patch = {}) {
@@ -1010,9 +1061,10 @@ export function updatePlan(id, patch = {}) {
     credits: patch.credits != null ? Math.max(0, Math.floor(Number(patch.credits) || 0)) : cur.credits,
     sort: patch.sort != null ? Math.floor(Number(patch.sort) || 0) : cur.sort,
     active: patch.active != null ? (patch.active ? 1 : 0) : cur.active,
+    modules: patch.modules != null ? normalizeModuleIds(patch.modules) : cur.modules,
   };
-  db.prepare(`UPDATE plans SET name=?, description=?, price_cents=?, period_days=?, daily_chat_limit=?, credits=?, sort=?, active=? WHERE id=?`)
-    .run(next.name, next.description, next.price_cents, next.period_days, next.daily_chat_limit, next.credits, next.sort, next.active, id);
+  db.prepare(`UPDATE plans SET name=?, description=?, price_cents=?, period_days=?, daily_chat_limit=?, credits=?, sort=?, active=?, modules=? WHERE id=?`)
+    .run(next.name, next.description, next.price_cents, next.period_days, next.daily_chat_limit, next.credits, next.sort, next.active, next.modules, id);
   return getPlan(id);
 }
 
@@ -1026,15 +1078,16 @@ export function applySubscription(userId, planId, note = '') {
   if (!plan || !plan.active) return { ok: false, code: 'no_plan' };
   if (pendingSubscription(userId)) return { ok: false, code: 'pending_exists' };
   const r = db.prepare(`INSERT INTO subscriptions
-      (user_id, plan_id, plan_name, status, price_cents, period_days, daily_chat_limit, credits, note)
-    VALUES (?,?,?,'pending',?,?,?,?,?)`).run(
+      (user_id, plan_id, plan_name, status, price_cents, period_days, daily_chat_limit, credits, note, modules)
+    VALUES (?,?,?,'pending',?,?,?,?,?,?)`).run(
     userId, plan.id, plan.name, plan.price_cents, plan.period_days, plan.daily_chat_limit, plan.credits,
     String(note || '').slice(0, 200),
+    String(plan.modules || ''),
   );
   return { ok: true, id: Number(r.lastInsertRowid), plan };
 }
 
-// 审批通过：置为生效、按「快照」的周期算到期时间，并发放套餐额度
+// 审批通过：置为生效、按「快照」的周期算到期时间，发放套餐额度与模块权限
 export function approveSubscription(id, actorName = '') {
   const sub = db.prepare('SELECT * FROM subscriptions WHERE id = ?').get(id);
   if (!sub) return { ok: false, code: 'not_found' };
@@ -1054,7 +1107,30 @@ export function approveSubscription(id, actorName = '') {
   if (sub.credits > 0) {
     balance = addCredits(sub.user_id, sub.credits, 'subscribe', `套餐「${sub.plan_name}」发放 ${sub.credits} 次`);
   }
-  return { ok: true, expires_at: expiresRow.e, credits: balance };
+  // 发放模块权限（快照的 modules，到期时间与订阅一致；续期时同步顺延）
+  const granted = grantPlanModules(sub.user_id, parseModuleIds(sub.modules), expiresRow.e, sub.id, sub.plan_name);
+  return { ok: true, expires_at: expiresRow.e, credits: balance, modules: granted };
+}
+
+// 把套餐携带的模块权限发给用户：覆盖同名模块的旧「订阅型」记录（手动开通的保留不动）
+function grantPlanModules(userId, moduleIds, expiresAt, planId, planName) {
+  if (!moduleIds.length) return [];
+  const stmt = db.prepare(`INSERT INTO user_modules (user_id, module_id, enabled, granted_by, granted_at, source, plan_id, expires_at)
+    VALUES (?,?,1,?,datetime('now'),'plan',?,?)
+    ON CONFLICT(user_id, module_id) DO UPDATE SET
+      enabled = 1,
+      granted_by = excluded.granted_by,
+      granted_at = datetime('now'),
+      -- 手动开通的不降级为订阅型（避免订阅到期把管理员发的权限一起收走）
+      source = CASE WHEN user_modules.source = 'manual' THEN 'manual' ELSE 'plan' END,
+      plan_id = CASE WHEN user_modules.source = 'manual' THEN user_modules.plan_id ELSE excluded.plan_id END,
+      expires_at = CASE WHEN user_modules.source = 'manual' THEN user_modules.expires_at ELSE excluded.expires_at END`);
+  const out = [];
+  for (const m of moduleIds) {
+    stmt.run(userId, m, `套餐「${planName}」`, planId, expiresAt);
+    out.push(m);
+  }
+  return out;
 }
 
 export function rejectSubscription(id, reason = '') {
@@ -1123,30 +1199,91 @@ export function listModuleSiteEnabled() {
   return out;
 }
 
-// 用户开通记录（map: moduleId -> { enabled, granted_at, granted_by }）
+// 用户开通记录（map: moduleId -> { enabled, granted_at, granted_by, source, plan_id, expires_at }）
+// source: 'manual'（管理员/默认发放）| 'plan'（订阅附带，可到期失效）
+// 读到期的订阅型权限会顺手清理，所以这里返回的都是仍有效的记录。
 export function listUserModules(userId) {
-  const rows = db.prepare('SELECT module_id, enabled, granted_by, granted_at FROM user_modules WHERE user_id = ?')
-    .all(userId);
+  revokeExpiredModuleGrants(userId);
+  const rows = db.prepare(`SELECT module_id, enabled, granted_by, granted_at, source, plan_id, expires_at
+    FROM user_modules WHERE user_id = ?`).all(userId);
   const map = {};
-  for (const r of rows) map[r.module_id] = { enabled: Boolean(r.enabled), granted_by: r.granted_by, granted_at: r.granted_at };
+  for (const r of rows) {
+    map[r.module_id] = {
+      enabled: Boolean(r.enabled),
+      granted_by: r.granted_by,
+      granted_at: r.granted_at,
+      source: r.source || 'manual',
+      plan_id: r.plan_id ?? null,
+      expires_at: r.expires_at ?? null,
+    };
+  }
   return map;
 }
 
+// 单个模块的开通记录（含来源与到期），供前端展示「订阅至 X 月 X 日」
+export function getUserModuleGrant(userId, moduleId) {
+  revokeExpiredModuleGrants(userId);
+  const r = db.prepare(`SELECT module_id, enabled, granted_by, granted_at, source, plan_id, expires_at
+    FROM user_modules WHERE user_id = ? AND module_id = ?`).get(userId, moduleId);
+  if (!r) return null;
+  return {
+    enabled: Boolean(r.enabled),
+    granted_by: r.granted_by,
+    granted_at: r.granted_at,
+    source: r.source || 'manual',
+    plan_id: r.plan_id ?? null,
+    expires_at: r.expires_at ?? null,
+  };
+}
+
 export function grantUserModule(userId, moduleId, grantedBy = '') {
-  db.prepare(`INSERT INTO user_modules (user_id, module_id, enabled, granted_by, granted_at)
-    VALUES (?,?,1,?,datetime('now'))
-    ON CONFLICT(user_id, module_id) DO UPDATE SET enabled = 1, granted_by = excluded.granted_by, granted_at = datetime('now')`)
+  db.prepare(`INSERT INTO user_modules (user_id, module_id, enabled, granted_by, granted_at, source, plan_id, expires_at)
+    VALUES (?,?,1,?,datetime('now'),'manual',NULL,NULL)
+    ON CONFLICT(user_id, module_id) DO UPDATE SET
+      enabled = 1, granted_by = excluded.granted_by, granted_at = datetime('now'),
+      -- 管理员手动开通 = 永久授权：清掉订阅来源与到期时间，订阅到期不会把它收走
+      source = 'manual', plan_id = NULL, expires_at = NULL`)
     .run(userId, moduleId, grantedBy);
 }
 
+// 撤销 = 写一条 enabled=0 的「墓碑」记录（而不是删除）。
+// 原因：中医是站点级默认模块（defaultGrant），删除记录会退回兜底逻辑、等于撤不掉；
+// 留下墓碑才能「撤销也可以生效」，同时后台名单里能看出这个用户的这块权限被拿掉了。
 export function revokeUserModule(userId, moduleId) {
-  db.prepare('DELETE FROM user_modules WHERE user_id = ? AND module_id = ?').run(userId, moduleId);
+  db.prepare(`INSERT INTO user_modules (user_id, module_id, enabled, granted_by, granted_at, source, plan_id, expires_at)
+    VALUES (?,?,0,'revoked',datetime('now'),'manual',NULL,NULL)
+    ON CONFLICT(user_id, module_id) DO UPDATE SET
+      enabled = 0, granted_by = 'revoked', granted_at = datetime('now'), plan_id = NULL, expires_at = NULL`)
+    .run(userId, moduleId);
+}
+
+// 新建用户时的默认模块（站点设置 default_modules，逗号分隔；默认只有中医）。
+// 显式写进 user_modules（source='default'），后台能看到、可逐个撤销。
+export function getDefaultModules() {
+  const raw = getSetting('default_modules');
+  if (raw === null || raw === undefined) return ['tcm'];
+  return String(raw).split(',').map((x) => x.trim()).filter((x) => MODULE_IDS.includes(x));
+}
+
+export function setDefaultModules(ids) {
+  setSetting('default_modules', normalizeModuleIds(ids));
+}
+
+export function applyDefaultModules(userId) {
+  const ids = getDefaultModules();
+  const stmt = db.prepare(`INSERT INTO user_modules (user_id, module_id, enabled, granted_by, granted_at, source, plan_id, expires_at)
+    VALUES (?,?,1,'默认开通',datetime('now'),'default',NULL,NULL)
+    ON CONFLICT(user_id, module_id) DO NOTHING`);
+  for (const id of ids) stmt.run(userId, id);
+  return ids;
 }
 
 export function bulkGrantUserModule(ids, moduleId, grantedBy = '') {
-  const stmt = db.prepare(`INSERT INTO user_modules (user_id, module_id, enabled, granted_by, granted_at)
-    VALUES (?,?,1,?,datetime('now'))
-    ON CONFLICT(user_id, module_id) DO UPDATE SET enabled = 1, granted_by = excluded.granted_by, granted_at = datetime('now')`);
+  const stmt = db.prepare(`INSERT INTO user_modules (user_id, module_id, enabled, granted_by, granted_at, source, plan_id, expires_at)
+    VALUES (?,?,1,?,datetime('now'),'manual',NULL,NULL)
+    ON CONFLICT(user_id, module_id) DO UPDATE SET
+      enabled = 1, granted_by = excluded.granted_by, granted_at = datetime('now'),
+      source = 'manual', plan_id = NULL, expires_at = NULL`);
   db.exec('BEGIN');
   try {
     let n = 0;
@@ -1161,8 +1298,9 @@ export function bulkGrantUserModule(ids, moduleId, grantedBy = '') {
 
 // 管理端：某模块已开通的用户列表
 export function listModuleUsers(moduleId) {
+  revokeExpiredModuleGrants();
   return db.prepare(`
-    SELECT u.id, u.username, um.granted_at, um.granted_by
+    SELECT u.id, u.username, um.granted_at, um.granted_by, um.source, um.expires_at
     FROM user_modules um JOIN users u ON u.id = um.user_id
     WHERE um.module_id = ? AND um.enabled = 1
     ORDER BY um.granted_at DESC`).all(moduleId);
@@ -1176,7 +1314,8 @@ export function userHasModule(user, moduleId) {
   if (!user) return false;
   if (isAdminUser(user)) return true;
   if (!getModuleSiteEnabled(moduleId)) return false;
-  if (MODULE_DEFAULT_GRANTS.has(moduleId)) return true;
-  const row = db.prepare('SELECT enabled FROM user_modules WHERE user_id = ? AND module_id = ?').get(user.id, moduleId);
-  return Boolean(row && row.enabled);
+  const g = getUserModuleGrant(user.id, moduleId); // 内含到期清理
+  // 有记录（含撤销墓碑）一律以记录为准；只有从没发过牌的老账号才吃 defaultGrant 兜底
+  if (g) return Boolean(g.enabled);
+  return MODULE_DEFAULT_GRANTS.has(moduleId);
 }

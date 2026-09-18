@@ -175,6 +175,7 @@ export const api = {
   adminRevokeModule: (id, userId) => request(`/api/admin/modules/${id}/revoke`, { method: 'POST', body: { user_id: userId } }),
   adminGrantModuleBulk: (moduleId, ids) => request('/api/admin/modules/grant-bulk', { method: 'POST', body: { module_id: moduleId, ids } }),
   adminReviewModuleRequest: (id, decision) => request(`/api/admin/module-requests/${id}/review`, { method: 'POST', body: { decision } }),
+  adminDefaultModules: (modules) => request('/api/admin/modules-defaults', { method: 'PUT', body: { modules } }),
 };
 
 // 展示层用的流式错误（notice 提示 / error 终止）

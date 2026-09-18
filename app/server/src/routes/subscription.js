@@ -11,10 +11,14 @@ import {
   listPlans, activeSubscription, pendingSubscription,
   applySubscription, resolveQuota, listSubscriptions,
   cancelSubscriptionById, expireSubscriptions,
+  parseModuleIds, listUserModules, revokeExpiredModuleGrants,
 } from '../db.js';
+import { MODULES } from '../modules/registry.js';
 import { sendError, clamp } from '../lib/validate.js';
 
+// 套餐展示：附带「包含哪些模块」——用户要能看清这个套餐买到的是哪几位「先生」的权限
 function planView(p) {
+  const ids = parseModuleIds(p.modules);
   return {
     id: p.id,
     name: p.name,
@@ -23,7 +27,33 @@ function planView(p) {
     period_days: p.period_days,
     daily_chat_limit: p.daily_chat_limit,
     credits: p.credits,
+    modules: ids,
+    modules_detail: ids.map((id) => {
+      const m = MODULES.find((x) => x.id === id);
+      return m ? { id, name: m.name, icon: m.icon, color: m.color } : { id, name: id, icon: 'sparkles', color: '#888' };
+    }),
   };
+}
+
+// 我当前持有的模块权限（含来源与到期）——订阅面板与门户共用同一口径
+function myModuleGrants(userId) {
+  revokeExpiredModuleGrants(userId);
+  const mine = listUserModules(userId);
+  return MODULES.map((m) => {
+    const g = mine[m.id];
+    // 有记录以记录为准（撤销墓碑 = 无权限）；无记录才退回站点默认
+    const has = g ? g.enabled : Boolean(m.defaultGrant);
+    if (!has) return null;
+    return {
+      id: m.id,
+      name: m.name,
+      icon: m.icon,
+      color: m.color,
+      source: g?.granted_by ? (g.source || 'manual') : (m.defaultGrant ? 'default' : 'manual'),
+      expires_at: g?.expires_at || null,
+      granted_by: g?.granted_by || '',
+    };
+  }).filter(Boolean);
 }
 
 export default async function subscriptionRoutes(fastify) {
@@ -34,7 +64,12 @@ export default async function subscriptionRoutes(fastify) {
     const history = listSubscriptions({ userId: req.user.id, limit: 20 });
     return {
       plans: listPlans().map(planView),
-      current: activeSubscription(req.user.id),
+      current: (() => {
+        const cur = activeSubscription(req.user.id);
+        if (!cur) return null;
+        return { ...cur, modules: parseModuleIds(cur.modules) };
+      })(),
+      my_modules: myModuleGrants(req.user.id),
       pending: pendingSubscription(req.user.id),
       history,
       quota: resolveQuota(req.user.id),

@@ -21,7 +21,7 @@ function daysLeft(expiresAt) {
   return Math.ceil((end.getTime() - Date.now()) / 86400000);
 }
 
-const EMPTY_PLAN = { name: '', description: '', price_cents: 0, period_days: 30, credits: 0, daily_chat_limit: 0, sort: 0, active: true };
+const EMPTY_PLAN = { name: '', description: '', price_cents: 0, period_days: 30, credits: 0, daily_chat_limit: 0, sort: 0, active: true, modules: [] };
 
 export default function AdminPlans({ initialGrantFor, onClearGrantFor }) {
   const [plans, setPlans] = useState([]);
@@ -60,6 +60,14 @@ export default function AdminPlans({ initialGrantFor, onClearGrantFor }) {
     }
   }, [initialGrantFor, onClearGrantFor]);
 
+  // 模块目录（套餐可勾选包含哪些模块）——一次性拉取，套餐表单与表格共用
+  const [moduleOptions, setModuleOptions] = useState([]);
+  useEffect(() => {
+    api.adminModules()
+      .then((d) => setModuleOptions((d.modules || []).map((m) => ({ id: m.id, name: m.name, icon: m.icon, color: m.color }))))
+      .catch(() => {});
+  }, []);
+
   const pending = subs.filter((s) => s.status === 'pending');
   const active = subs.filter((s) => s.status === 'active' && daysLeft(s.expires_at) > 0);
   const others = subs.filter((s) => s.status !== 'pending' && !(s.status === 'active' && daysLeft(s.expires_at) > 0));
@@ -77,6 +85,8 @@ export default function AdminPlans({ initialGrantFor, onClearGrantFor }) {
         daily_chat_limit: Number(planForm.daily_chat_limit) || 0,
         sort: Number(planForm.sort) || 0,
         active: planForm.active !== false,
+        // 订阅按模块区分权限：勾选哪些模块，开通后用户就拿到哪些
+        modules: planForm.modules || [],
       };
       if (planForm.id) await api.adminUpdatePlan(planForm.id, body);
       else await api.adminCreatePlan(body);
@@ -229,7 +239,7 @@ export default function AdminPlans({ initialGrantFor, onClearGrantFor }) {
         <h3>套餐（{plans.length}）</h3>
         <table className="admin-table">
           <thead>
-            <tr><th>名称</th><th>价格</th><th>周期</th><th>额度</th><th>每日上限</th><th>排序</th><th>状态</th><th>操作</th></tr>
+            <tr><th>名称</th><th>价格</th><th>周期</th><th>额度</th><th>每日上限</th><th>含模块</th><th>排序</th><th>状态</th><th>操作</th></tr>
           </thead>
           <tbody>
             {plans.map((p) => (
@@ -242,12 +252,17 @@ export default function AdminPlans({ initialGrantFor, onClearGrantFor }) {
                 <td>{p.period_days} 天</td>
                 <td>{p.credits > 0 ? `${p.credits} 次` : '—'}</td>
                 <td>{p.daily_chat_limit > 0 ? `${p.daily_chat_limit} 次` : '不限'}</td>
+                <td className="td-dim">
+                  {(p.modules || []).length === 0
+                    ? '—'
+                    : (p.modules || []).map((id) => moduleOptions.find((m) => m.id === id)?.name || id).join('、')}
+                </td>
                 <td className="td-dim">{p.sort}</td>
                 <td>
                   <span className={`badge ${p.active ? 'badge-on' : 'badge-off'}`}>{p.active ? '上架' : '下架'}</span>
                 </td>
                 <td className="td-actions">
-                  <button className="link-btn" onClick={() => setPlanForm({ ...p })}>编辑</button>
+                  <button className="link-btn" onClick={() => setPlanForm({ ...p, modules: p.modules || [] })}>编辑</button>
                   <button className="link-btn" onClick={() => togglePlan(p)}>{p.active ? '下架' : '上架'}</button>
                   <button className="link-btn danger" onClick={() => removePlan(p)}>删除</button>
                 </td>
@@ -353,8 +368,37 @@ export default function AdminPlans({ initialGrantFor, onClearGrantFor }) {
               <span>排序（小的靠前）</span>
               <input type="number" step="1" value={planForm.sort} onChange={(e) => setPlanForm((f) => ({ ...f, sort: e.target.value }))} />
             </label>
+
+            {/* 订阅按模块区分权限：勾选本套餐包含哪些模块 */}
+            <div className="field">
+              <span>包含模块权限 <small>（不勾 = 只给额度、不给任何模块）</small></span>
+              <div className="module-picker">
+                {moduleOptions.map((m) => {
+                  const on = (planForm.modules || []).includes(m.id);
+                  return (
+                    <label key={m.id} className={`module-pick ${on ? 'on' : ''}`} style={{ '--mc': m.color }}>
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={(e) => setPlanForm((f) => {
+                          const cur = f.modules || [];
+                          return { ...f, modules: e.target.checked ? [...cur, m.id] : cur.filter((x) => x !== m.id) };
+                        })}
+                      />
+                      <Icon name={m.icon} size={13} /> {m.name}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="field-row">
+              <button type="button" className="text-btn" onClick={() => setPlanForm((f) => ({ ...f, modules: moduleOptions.map((m) => m.id) }))}>全选模块</button>
+              <button type="button" className="text-btn" onClick={() => setPlanForm((f) => ({ ...f, modules: [] }))}>清空</button>
+            </div>
+
             <p className="admin-hint">
-              开通时会把本套餐的额度与每日上限「快照」到该用户的订阅上；之后再改套餐不影响已开通的用户。
+              开通时会把本套餐的额度、每日上限与<b>模块权限</b>「快照」到该用户的订阅上；之后再改套餐不影响已开通的用户。
+              订阅发放的模块权限随订阅到期自动收回；管理员在「模块管理」里手动开通的是永久权限，两者互不覆盖。
               额度只对「额度制」账号入账，不限次账号不受影响。
             </p>
             <div className="sheet-actions">
