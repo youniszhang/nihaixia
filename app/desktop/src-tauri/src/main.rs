@@ -202,6 +202,9 @@ fn main() {
                         return;
                     }
                 };
+                // 注意：app_data_dir() = ~/Library/Application Support/<bundle identifier>。
+                // tauri.conf.json 的 identifier 是「本地用户数据目录的键」，产品改名时**不要**跟着改，
+                // 否则老用户的本地库与 app_secret 会被指向新空目录，表现为历史记录全部消失。
                 let data_dir = handle
                     .path()
                     .app_data_dir()

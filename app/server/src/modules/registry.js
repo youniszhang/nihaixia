@@ -14,23 +14,36 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// 本模块所在目录（仅源码/ESM 模式可得）。
+// 桌面版把服务端打成 CJS 单文件（sea.cjs）后 import.meta.url 会是 undefined，
+// 直接 fileURLToPath(undefined) 会抛 ERR_INVALID_ARG_TYPE 让服务起不来，
+// 所以这里必须容错：拿不到就返回空串，由下面的候选路径兜底。
+const __dirnameSafe = (() => {
+  try {
+    // 用动态形式访问，避免 esbuild 在 CJS 输出下静态求值时报错
+    const metaUrl = typeof import.meta !== 'undefined' ? import.meta.url : undefined;
+    if (!metaUrl) return '';
+    return path.dirname(new URL(metaUrl).pathname);
+  } catch {
+    return '';
+  }
+})();
+
 // 脚本目录解析顺序：
 //   1. XUANSHU_SCRIPTS_DIR 环境变量（桌面版 Tauri resources 传入）
 //   2. 源码树相对路径（node 直接跑 src/index.js 的开发/服务器模式）
-//   3. cwd 相对路径（SEA bundle：import.meta 不可用时的兜底）
+//   3. cwd 相对路径（SEA/CJS bundle：import.meta 不可用时的兜底）
 function resolveScriptsDir() {
   if (process.env.XUANSHU_SCRIPTS_DIR) return process.env.XUANSHU_SCRIPTS_DIR;
   const candidates = [
-    path.resolve(__dirname, '../../scripts/xuanshu'),
+    __dirnameSafe ? path.resolve(__dirnameSafe, '../../scripts/xuanshu') : null,
     path.resolve(process.cwd(), 'scripts/xuanshu'),
-  ];
+  ].filter(Boolean);
   for (const c of candidates) {
     try { if (fs.existsSync(c)) return c; } catch { /* ignore */ }
   }
-  return candidates[0];
+  return candidates[0] || path.resolve(process.cwd(), 'scripts/xuanshu');
 }
 export const SCRIPTS_DIR = resolveScriptsDir();
 
