@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "nihaixia",
+  "productName": "xuanshu",
   "version": "1.0.0",
-  "identifier": "com.nihaixia.desktop",
+  "identifier": "com.xuanshu.desktop",
   "build": {
     "frontendDist": "../launcher"
   },
@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "倪海厦中医问诊",
+        "title": "玄枢 · 传统智慧 AI 工作台",
         "width": 1280,
         "height": 840,
         "minWidth": 420,
@@ -31,6 +31,7 @@
       "binaries/nihaixia-node": "binaries/nihaixia-node",
       "binaries/sea.cjs": "binaries/sea.cjs",
       "knowledge/": "knowledge/",
+      "scripts/": "scripts/",
       "web-dist/": "web-dist/"
     },
     "macOS": {

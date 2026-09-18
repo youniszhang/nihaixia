@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import config from '../config.js';
-import { getUserStatus, getUserTokenVersion } from '../db.js';
+import { getUserStatus, getUserTokenVersion, isAdminUser } from '../db.js';
 
 const TOKEN_TTL_MS = 7 * 24 * 3600 * 1000; // 7 days
 
@@ -50,7 +50,13 @@ export function createAuthenticate() {
     if (tv != null && Number(payload.tv || 0) !== tv) {
       return reply.code(401).send({ error: 'token_revoked', message: '登录状态已失效，请重新登录' });
     }
-    req.user = { id: payload.uid, username: payload.un };
+    // is_admin 挂到 req.user：模块鉴权（userHasModule）与管理路由都用它
+    const id = payload.uid;
+    req.user = {
+      id,
+      username: payload.un,
+      get is_admin() { return isAdminUser({ id, username: payload.un }); },
+    };
   };
 }
 

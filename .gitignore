@@ -11,6 +11,9 @@ long_lines_analysis.txt
 undistilled_lines.txt
 split_skill.py
 scripts/
+# 例外：玄枢模块的排盘/抽牌脚本必须随仓库分发（服务器部署 git pull 依赖）
+!app/server/scripts/
+!app/server/scripts/**
 
 # Python
 __pycache__/

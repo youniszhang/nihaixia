@@ -1,8 +1,8 @@
 import Icon from './Icon.jsx';
 
-// 侧边栏：问诊历史 + 用户入口。图标统一用 Icon（SVG），不再用 emoji。
+// 侧边栏：当前模块的会话历史 + 用户入口。图标统一用 Icon（SVG），不再用 emoji。
 export default function Sidebar({
-  sessions, activeId, onSelect, onNew, onDelete, onProfile, onAdminConsole,
+  module, onBackToPortal, sessions, activeId, onSelect, onNew, onDelete, onProfile, onAdminConsole,
   user, onLogout, onClose, quota, checkedInToday, onMembership,
 }) {
   const unlimited = quota?.unlimited;
@@ -10,6 +10,7 @@ export default function Sidebar({
   const limitText = quota
     ? (quota.daily_limit > 0 ? `${quota.used_today}/${quota.daily_limit}` : '不限')
     : null;
+  const isTcm = module?.id === 'tcm';
 
   return (
     <>
@@ -17,19 +18,23 @@ export default function Sidebar({
       <aside className="sidebar">
         <div className="sidebar-top">
           <div className="brand">
-            <span className="brand-seal">医</span>
+            <span className="brand-seal" style={isTcm ? undefined : { background: module?.color }}>{module?.name?.slice(0, 1) || '玄'}</span>
             <div>
-              <strong>倪海厦问诊</strong>
-              <small>经方派 AI 助手</small>
+              <strong>{module?.name || '玄枢'}</strong>
+              <small>{module?.tagline || '传统智慧 AI 工作台'}</small>
             </div>
           </div>
           <button className="btn-primary new-chat" onClick={onNew}>
-            <Icon name="plus" size={17} /> 新问诊
+            <Icon name="plus" size={17} /> 新对话
           </button>
         </div>
 
+        <button className="back-portal" onClick={onBackToPortal} title="返回模块门户">
+          <Icon name="arrow-left" size={15} /> 全部模块
+        </button>
+
         <div className="session-list">
-          {sessions.length === 0 && <p className="session-empty">还没有问诊记录，点击上方开始。</p>}
+          {sessions.length === 0 && <p className="session-empty">还没有对话记录，点击上方开始。</p>}
           {sessions.map((s) => (
             <div
               key={s.id}

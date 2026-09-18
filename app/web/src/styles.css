@@ -3341,3 +3341,499 @@ body {
   color: var(--text-muted);
   font-size: 0.86rem;
 }
+
+/* ================= 玄枢 · 模块门户 ================= */
+.portal-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.portal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 28px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.portal-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.portal-seal {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #2c2a26, #4a443c);
+  color: #e8dcc0;
+  font-size: 1.3rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.portal-brand strong {
+  font-size: 1.1rem;
+  display: block;
+}
+
+.portal-brand small {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.portal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.portal-main {
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 36px 24px 60px;
+  flex: 1;
+}
+
+.portal-hero h1 {
+  font-size: 1.55rem;
+  margin-bottom: 8px;
+}
+
+.portal-hero p {
+  color: var(--text-dim);
+  font-size: 0.92rem;
+  margin-bottom: 30px;
+}
+
+.portal-subtitle {
+  font-size: 0.95rem;
+  color: var(--text-dim);
+  margin: 30px 0 14px;
+}
+
+.portal-error {
+  background: #fdecea;
+  border: 1px solid #f5c6c0;
+  color: #a3382c;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 0.86rem;
+  margin-bottom: 16px;
+}
+
+.portal-notice {
+  background: #eef7f0;
+  border: 1px solid #cbe5d2;
+  color: #2d6a3e;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 0.86rem;
+  margin-bottom: 16px;
+}
+
+.portal-offline-hint {
+  margin-top: 26px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.module-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 16px;
+}
+
+.module-card {
+  --mc: var(--red);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 20px 18px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.module-card:hover:not(:disabled):not(.locked) {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.09);
+  border-color: var(--mc);
+}
+
+.module-card:disabled { cursor: wait; opacity: 0.7; }
+
+.module-card.locked {
+  cursor: default;
+  background: var(--bg-elevated);
+}
+
+.module-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.module-name {
+  font-size: 1.06rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.module-tagline {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.module-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  color: var(--amber);
+  background: rgba(184, 134, 11, 0.09);
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+.module-enter {
+  margin-top: auto;
+  padding-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.8rem;
+  color: var(--mc);
+  font-weight: 600;
+}
+
+.module-card.locked .module-enter { display: none; }
+
+.module-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.module-apply {
+  margin-top: 6px;
+  padding: 7px 16px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-card);
+  font-size: 0.8rem;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--text-dim);
+  transition: all 0.15s;
+}
+
+.module-apply:hover:not(:disabled) {
+  border-color: var(--mc);
+  color: var(--mc);
+}
+
+/* ================= 玄枢 · 聊天区模块元素 ================= */
+.module-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #fff;
+  font-size: 0.72rem;
+  padding: 3px 10px;
+  border-radius: 999px;
+  margin-right: 8px;
+  vertical-align: 2px;
+}
+
+.back-portal {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 14px 0;
+  padding: 8px 12px;
+  border: 1px dashed var(--sidebar-active);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-inverse);
+  font-size: 0.8rem;
+  font-family: inherit;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: all 0.15s;
+}
+
+.back-portal:hover { opacity: 1; background: var(--sidebar-hover); }
+
+/* ================= 玄枢 · 管理后台模块管理页 ================= */
+.admin-msg.ok {
+  background: #eef7f0;
+  border: 1px solid #cbe5d2;
+  color: #2d6a3e;
+  padding: 9px 13px;
+  border-radius: 10px;
+  font-size: 0.84rem;
+  margin-bottom: 12px;
+}
+
+.admin-msg.err {
+  background: #fdecea;
+  border: 1px solid #f5c6c0;
+  color: #a3382c;
+  padding: 9px 13px;
+  border-radius: 10px;
+  font-size: 0.84rem;
+  margin-bottom: 12px;
+}
+
+.module-head-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.switch-label {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.module-dot {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.module-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.inline-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.inline-select select {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.8rem;
+  background: var(--bg-card);
+}
+
+.module-users {
+  margin-top: 14px;
+  border-top: 1px dashed var(--border);
+  padding-top: 12px;
+}
+
+.chip-warn {
+  background: rgba(176, 58, 46, 0.1);
+  color: var(--red);
+}
+
+.empty-hint {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  padding: 8px 0;
+}
+
+.td-note {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
+.td-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+  .module-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+  .portal-header { padding: 12px 16px; }
+  .portal-main { padding: 24px 16px 48px; }
+}
+
+/* ---- AdminModules 补充（card 面板 / 小按钮 / chip） ---- */
+.admin-section .card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+
+.admin-section .card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-section .card-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.admin-section .card-sub {
+  margin: 6px 0 0;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
+.admin-section .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  padding: 2px 9px;
+  border-radius: 999px;
+}
+
+.btn-sm {
+  font-size: 0.78rem;
+  padding: 4px 10px;
+}
+
+.btn-sm.danger { color: var(--red); }
+
+.module-table {
+  margin-top: 10px;
+}
+
+/* ===== 免责声明弹窗：底部动作栏补齐内边距 =====
+   该弹窗的 .sheet-actions 不在 .intake-form 里（其他弹窗有 20px 包裹），
+   缺 padding 会让按钮贴到卡片边缘、底部留出一条突兀空白带。 */
+.disclaimer-sheet .sheet-actions {
+  margin-top: 0;
+  padding: 16px 24px 22px;
+  border-top: 1px solid var(--border-light);
+}
+
+.disclaimer-sheet .sheet-actions .btn-primary {
+  width: 100%;
+  padding: 12px 20px;
+  font-size: 0.9rem;
+}
+
+/* 管理员视角：模块尚未对普通用户上线 */
+.module-admin-flag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 7px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 500;
+  color: var(--amber);
+  background: rgba(184, 134, 11, 0.12);
+  vertical-align: 1px;
+}
+
+/* ===== 门户头部入口（浅底专用，区别于深色侧栏的 .side-link） =====
+   .side-link 是给深色侧栏写的（白字 + width:100%），放在白底门户头部会隐形并撑破布局。 */
+.portal-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text-dim);
+  font-size: 0.83rem;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.portal-link:hover {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.portal-link-admin {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.portal-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.84rem;
+  color: var(--text-dim);
+  max-width: 160px;
+}
+
+.portal-user .side-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--gold);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* ===== 聊天页：常驻「返回模块门户」按钮 =====
+   桌面端侧栏可见（里面也有入口），窄屏侧栏是抽屉式、PWA 窗口又没有浏览器返回键，
+   所以顶栏这个按钮在所有尺寸都保留，避免「进了模块回不去」。 */
+.back-btn {
+  display: flex;
+  color: var(--text-dim);
+}
+
+.back-btn:hover { color: var(--red); }

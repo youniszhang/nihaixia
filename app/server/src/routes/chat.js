@@ -1,7 +1,11 @@
-import { getSession, addMessage, touchSession, countMessages, renameSession, getProfile, listRecentMessages, updateSessionPin, getSetting, logUsage, usageCountToday, resolveQuota, consumeCredit } from '../db.js';
+import { getSession, addMessage, touchSession, countMessages, renameSession, getProfile, listRecentMessages, updateSessionPin, getSetting, logUsage, usageCountToday, resolveQuota, consumeCredit, userHasModule } from '../db.js';
 import { sendError, clamp } from '../lib/validate.js';
-import { retrieve } from '../knowledge/loader.js';
-import { SYSTEM_PROMPT, buildRagBlock } from '../knowledge/system-prompt.js';
+import { redact, errorRef } from '../lib/redact.js';
+import { retrieve, retrieveForModule } from '../knowledge/loader.js';
+import { buildRagBlock } from '../knowledge/system-prompt.js';
+import { MODULE_PROMPTS } from '../modules/prompts.js';
+import { getModule, detectBoostDirs } from '../modules/registry.js';
+import { baziPaiPan, tarotDraw, qimenPaiPan } from '../modules/tools.js';
 import { streamChat } from '../llm.js';
 import { connectDeepSeek, askStream, killBrowser, findBrowserBinary } from '../lib/dsweb.js';
 import { askDirect } from '../lib/dsapi.js';
@@ -21,7 +25,58 @@ function profileBlock(p) {
   if (p.weight_kg) lines.push(`体重：${p.weight_kg} kg`);
   if (p.body_notes) lines.push(`体征备注：${p.body_notes}`);
   if (!lines.length) return '';
-  return '\n\n【病人体质档案】\n' + lines.join('\n');
+  return '\n\n【用户体质档案（问诊参考）】\n' + lines.join('\n');
+}
+
+// 模块会话的固定背景块：中医沿用「问诊单」语义，其余模块统称「咨询背景」
+function pinLabel(moduleId) {
+  return moduleId === 'tcm' ? '问诊' : '咨询';
+}
+
+// —— 工具执行：识别消息中的排盘/抽牌请求并跑脚本 ——
+// 返回 { ran: bool, label: string, output: string }
+async function runModuleTool(moduleId, content, getSettingFn) {
+  const mod = getModule(moduleId);
+  if (!mod || !mod.tools.length) return null;
+
+  if (moduleId === 'bazi') {
+    // 模型/用户以【排盘请求】标记触发；参数由上一轮模型给出的 JSON 携带
+    const m = content.match(/【排盘请求】\s*```json\s*([\s\S]*?)```/);
+    if (!m) return null;
+    try {
+      const args = JSON.parse(m[1].trim());
+      const out = await baziPaiPan(args);
+      return { ran: true, label: '四柱排盘脚本输出', output: out };
+    } catch (e) {
+      return { ran: true, label: '排盘脚本错误', output: String(e.message || e) };
+    }
+  }
+
+  if (moduleId === 'qimen') {
+    const m = content.match(/【起局请求】\s*```json\s*([\s\S]*?)```/);
+    if (!m) return null;
+    try {
+      const args = JSON.parse(m[1].trim());
+      const out = await qimenPaiPan(args);
+      return { ran: true, label: '奇门排盘脚本输出（mainline-cn-v1）', output: typeof out === 'string' ? out : JSON.stringify(out, null, 1).slice(0, 18000) };
+    } catch (e) {
+      return { ran: true, label: '起局脚本错误', output: String(e.message || e) };
+    }
+  }
+
+  if (moduleId === 'tarot') {
+    const m = content.match(/【抽牌请求】\s*```json\s*([\s\S]*?)```/);
+    if (!m) return null;
+    try {
+      const args = JSON.parse(m[1].trim());
+      const out = await tarotDraw(args);
+      return { ran: true, label: '抽牌脚本输出（含 seed/time_factor，解读时必须原样展示）', output: JSON.stringify(out, null, 1) };
+    } catch (e) {
+      return { ran: true, label: '抽牌脚本错误', output: String(e.message || e) };
+    }
+  }
+
+  return null;
 }
 
 export default async function chatRoutes(fastify) {
@@ -37,18 +92,24 @@ export default async function chatRoutes(fastify) {
     const session = getSession(sessionId);
     if (!session || session.user_id !== req.user.id) return sendError(reply, 'not_found', '问诊会话不存在', 404);
 
-    // 问诊额度（每用户）：
-    //   1) 剩余额度（users.credits；不限次账号为 null）用尽后直接拒绝，引导去签到/订阅
-    //   2) 每日上限，优先级「用户专属 > 生效套餐 > 站点默认」（站点 0 = 不限）
+    // 模块归属与开通校验：会话创建时已绑定模块；老会话（module 为空）视为中医
+    const moduleId = session.module || 'tcm';
+    const mod = getModule(moduleId);
+    if (!mod) return sendError(reply, 'bad_module', '该会话所属模块不存在', 400);
+    if (!userHasModule(req.user, moduleId)) {
+      return sendError(reply, 'module_locked', `「${mod.name}」模块未开通或已下线，请联系管理员开通。`, 403);
+    }
+
+    // 额度（每用户，全模块共用同一套额度/每日上限）：
     const quota = resolveQuota(req.user.id);
     if (!quota.unlimited && quota.credits <= 0) {
-      return sendError(reply, 'no_credits', '问诊额度已用完。可在「每日签到」中领取额度，或开通订阅套餐后继续。', 402);
+      return sendError(reply, 'no_credits', '额度已用完。可在「每日签到」中领取额度，或开通订阅套餐后继续。', 402);
     }
     if (quota.daily_limit > 0 && quota.used_today >= quota.daily_limit) {
       const src = quota.daily_limit_source === 'user' ? '（管理员为该账号设置）'
         : quota.daily_limit_source === 'plan' ? `（当前套餐「${quota.subscription?.plan_name || ''}」）`
         : '（站点默认）';
-      return sendError(reply, 'daily_limit', `今日问诊次数已达上限（每天 ${quota.daily_limit} 次）${src}，请明天再来。`, 429);
+      return sendError(reply, 'daily_limit', `今日使用次数已达上限（每天 ${quota.daily_limit} 次）${src}，请明天再来。`, 429);
     }
 
     // 扣额度：与 usage_log 同点发生，保证「计数」与「扣费」不会各算各的
@@ -62,20 +123,19 @@ export default async function chatRoutes(fastify) {
       } catch { return null; }
     };
 
-    // Persist an updated intake pin (十问/舌象) if the client sent one
+    // Persist an updated intake pin (十问/舌象 or 咨询背景) if the client sent one
     const activePin = pin || session.pin || '';
     if (pin && pin !== session.pin) {
       updateSessionPin(sessionId, pin);
     }
 
     // Keep a transient user message; it is persisted only when generation starts
-    // (avoids orphan rows on client abort mid-request setup).
     const userMsgId = addMessage(sessionId, 'user', content);
 
     // Auto-title from first user question
     if (countMessages(sessionId) <= 1) {
       const title = content.replace(/\s+/g, ' ').slice(0, 16);
-      renameSession(sessionId, title || '新问诊');
+      renameSession(sessionId, title || mod.name);
     }
 
     // Prepare SSE
@@ -90,8 +150,6 @@ export default async function chatRoutes(fastify) {
     req.raw.on('close', () => { clearInterval(heartbeat); abortController.abort(); });
 
     // Build conversation
-    // 注意：必须取「最近」N 条。旧的 listMessages 是 ASC+LIMIT，
-    // 长会话下返回最早的消息，本轮提问反而进不了上下文。
     const history = [];
     const rows = listRecentMessages(sessionId, 30);
     for (const r of rows) {
@@ -103,15 +161,35 @@ export default async function chatRoutes(fastify) {
     const profile = getProfile(req.user.id);
     const provider = getSetting('llm_provider') === 'dsweb' ? 'dsweb' : 'api';
 
-    const chunks = retrieve(content + '\n' + activePin, 8);
-    const sysContent = SYSTEM_PROMPT
-      + (activePin ? '\n\n【本次问诊固定背景（十问/舌象等摘录）】\n' + activePin : '')
+    // —— 模块人设 + 模块 RAG ——
+    const sysPrompt = MODULE_PROMPTS[moduleId] || MODULE_PROMPTS.tcm;
+    // 点名加权：佛门模块里用户说「请印光大师开示」，优先取印光的教法而不是同宗派其他祖师
+    const boostDirs = detectBoostDirs(mod, content);
+    const chunks = moduleId === 'tcm'
+      ? retrieve(content + '\n' + activePin, 8)
+      : retrieveForModule(content + '\n' + activePin, mod, 8, 7000, { boostDirs });
+
+    // —— 工具脚本（排盘/抽牌）：命中请求标记时先跑脚本，结果并入上下文 ——
+    let toolOut = null;
+    try {
+      toolOut = await runModuleTool(moduleId, content, getSetting);
+      if (toolOut?.ran) {
+        sse(reply, { type: 'tool', label: toolOut.label });
+      }
+    } catch (e) {
+      fastify.log.warn({ err: String(e) }, 'module tool failed');
+    }
+
+    let sysContent = sysPrompt
+      + (activePin ? `\n\n【本次${pinLabel(moduleId)}固定背景（用户提交的资料摘录）】\n` + activePin : '')
       + profileBlock(profile)
       + '\n\n' + buildRagBlock(chunks);
+    if (toolOut?.ran) {
+      sysContent += `\n\n【${toolOut.label}】\n${toolOut.output}\n（以上为脚本计算结果，解读必须与之一致；数值与文字不得改动）`;
+    }
 
     // —— system 消息的两种下法 ——
-    // 部分 OpenAI 兼容中转（如 aitrybest）会丢弃 system 角色，模型只看到裸提问，
-    // 表现为「倪师人设失效、被当成编程助手」。此时把人设并入本轮用户消息。
+    // 部分 OpenAI 兼容中转（如 aitrybest）会丢弃 system 角色，模型只看到裸提问。
     // auto：官方 api.deepseek.com 用 system，其它中转一律 inline（实测最稳）。
     const baseUrlForMode = getSetting('llm_base_url') || config.llm.baseUrl;
     const modeSetting = getSetting('llm_system_mode') || 'auto';
@@ -126,25 +204,26 @@ export default async function chatRoutes(fastify) {
         ]
       : [
           ...history,
-          { role: 'user', content: sysContent + '\n\n【病人发言】\n' + content },
+          { role: 'user', content: sysContent + '\n\n【用户发言】\n' + content },
         ];
 
     let full = '';
     try {
       sse(reply, { type: 'start', user_msg_id: userMsgId });
       if (provider === 'dsweb') {
-        // —— 网页版 DeepSeek（0 Token）：把系统指令与问诊上下文并入单条网页消息 ——
+        // —— 网页版 DeepSeek（0 Token）：把系统指令与模块上下文并入单条网页消息 ——
         const dsPort = Number(getSetting('dsweb_port') || 9223);
         const dsExpert = getSetting('dsweb_expert') !== 'false';
         const compactRag = chunks.length
           ? chunks.map((c, i) => `〔摘录${i + 1}〕${(c.content || '').slice(0, 400)}`).join('\n')
           : '';
         const webPrompt = [
-          '【角色设定】' + SYSTEM_PROMPT.split('【输出格式')[0].slice(0, 1200),
-          activePin ? '【问诊背景】\n' + activePin : '',
+          '【角色设定】' + sysPrompt.split('【输出格式')[0].split('【教学原则】')[0].slice(0, 1200),
+          activePin ? `【${pinLabel(moduleId)}背景】\n` + activePin : '',
           profileBlock(profile),
           compactRag ? '【知识库摘录（回答时参考，禁止照抄）】\n' + compactRag : '',
-          '【病人发言】\n' + content,
+          toolOut?.ran ? `【${toolOut.label}】\n${toolOut.output.slice(0, 8000)}` : '',
+          '【用户发言】\n' + content,
         ].filter(Boolean).join('\n\n');
 
         // 优先走「直连通道」：用管理员配置的登录凭证直接调网页版接口（无需浏览器，
@@ -232,27 +311,38 @@ export default async function chatRoutes(fastify) {
             completionChars: full.length,
           });
         } catch { /* 统计失败不影响对话 */ }
-        chargeCredit(`问诊消耗 · ${provider}`);
+        chargeCredit(`「${mod.name}」消耗 · ${provider}`);
         sse(reply, { type: 'done', message_id: asstId, quota: quotaSnapshot() });
       } else {
         sse(reply, { type: 'error', message: '本次未收到有效回复，请重试。' });
       }
     } catch (err) {
-      fastify.log.warn({ err: String(err) }, 'chat generation failed');
+      // 出口脱敏（安全）：上游错误体/URL 可能夹带 Authorization 头或密钥（部分中转与 WAF 会回显请求头），
+      // 完整原因只进服务端日志，客户端只拿到固定文案 + 一个可追查的错误短号。
+      const ref = errorRef();
+      fastify.log.error({
+        err: String(err),
+        detail: err?.detail,
+        ref,
+        userId: req.user.id,
+        module: moduleId,
+      }, 'chat generation failed');
       const msg =
         provider === 'dsweb' ? (
-          // 直连通道的失败原因要原样带给用户/管理员，否则只能翻服务器日志
-          '网页版 DeepSeek 调用失败：' + (err.message || String(err)).slice(0, 200)
-          + (/凭证|token|登录|未授权|401|403/i.test(String(err))
-            ? '（登录凭证可能已失效，请在管理后台「模型设置 → 粘贴登录凭证」重新导入）'
-            : '（管理员可在管理后台「模型设置」检查接入配置）')
+          redact(
+            '网页版 DeepSeek 调用失败：' + (err.message || String(err)).slice(0, 200)
+            + (/凭证|token|登录|未授权|401|403/i.test(String(err))
+              ? '（登录凭证可能已失效，请在管理后台「模型设置 → 粘贴登录凭证」重新导入）'
+              : '（管理员可在管理后台「模型设置」检查接入配置）'),
+          )
         )
         : err.code === 'no_api_key' ? '未配置模型：请管理员在「模型设置」中填写 API Key，或切换到网页版 DeepSeek（0 Token）模式。'
         : err.code === 'auth' ? '模型服务鉴权失败（API Key 无效）。'
         : err.code === 'rate_limit' ? '模型服务繁忙，请稍后重试。'
-        : err.code === 'network' ? `无法连接模型服务：${(err.message || '').slice(0, 150)}`
-        : err.code === 'upstream' ? `模型服务返回错误：${(err.detail || err.message || '').slice(0, 150)}`
-        : '模型服务暂不可用，请稍后再试。';
+        // 以下两类原本会把上游原文带给用户（含密钥风险）：改为固定文案 + 错误编号
+        : err.code === 'network' ? `无法连接模型服务（错误编号 ${ref}，详情见服务端日志）。`
+        : err.code === 'upstream' ? `模型服务返回错误（错误编号 ${ref}，详情见服务端日志）。`
+        : `模型服务暂不可用，请稍后再试（错误编号 ${ref}）。`;
       // Keep the partial answer if any
       if (full) {
         const asstId = addMessage(sessionId, 'assistant', full + `\n\n〔生成中断：${msg}〕`);

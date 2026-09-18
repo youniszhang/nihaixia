@@ -10,9 +10,9 @@ import DisclaimerModal from './DisclaimerModal.jsx';
 import MembershipPanel from './MembershipPanel.jsx';
 import Icon from './Icon.jsx';
 
-const DISCLAIMER_SEEN_KEY = 'nhx_disclaimer_accepted_v1';
+const DISCLAIMER_SEEN_KEY = 'xuanshu_disclaimer_accepted_v1';
 
-export default function ChatPage() {
+export default function ChatPage({ module, onBackToPortal }) {
   const { user, logout } = useAuth();
   const [sessions, setSessions] = useState([]);
   const [activeId, setActiveId] = useState(null);
@@ -27,7 +27,7 @@ export default function ChatPage() {
   const [showDisclaimer, setShowDisclaimer] = useState(
     typeof localStorage !== 'undefined' && !localStorage.getItem(DISCLAIMER_SEEN_KEY)
   );
-  const [intakeNote, setIntakeNote] = useState(''); // pinned summary (十问/舌象) for active session
+  const [intakeNote, setIntakeNote] = useState(''); // pinned summary (问诊单/咨询背景) for active session
   const [sessionTitle, setSessionTitle] = useState('');
   const [errNote, setErrNote] = useState(''); // 最近一次生成失败的原因（常驻到下次发送）
   const [quota, setQuota] = useState(null);   // 剩余额度 / 今日用量
@@ -41,6 +41,8 @@ export default function ChatPage() {
   const [renderAll, setRenderAll] = useState(false);
   const oldestIdRef = useRef(null);
 
+  const mod = module;
+
   function acceptDisclaimer() {
     try { localStorage.setItem(DISCLAIMER_SEEN_KEY, '1'); } catch { /* private mode */ }
     setShowDisclaimer(false);
@@ -49,6 +51,7 @@ export default function ChatPage() {
   const scrollRef = useRef(null);
   const abortRef = useRef(null);
   const scrollHostRef = useRef(null);
+  const inputRef = useRef(null);
   const listRef = useRef(sessions);
   listRef.current = sessions;
   // 会话消息缓存：点历史先出内容再静默刷新，避免闪空状态（"看起来像弹回新问诊"）
@@ -58,10 +61,11 @@ export default function ChatPage() {
 
   const refreshSessions = useCallback(async () => {
     try {
+      // 只列当前模块的会话（module 过滤在前端做；服务端会话已带 module 字段）
       const { sessions: s } = await api.listSessions();
-      setSessions(s);
+      setSessions(s.filter((x) => (x.module || 'tcm') === mod.id));
     } catch { /* ignore */ }
-  }, []);
+  }, [mod.id]);
 
   // 额度与签到状态：进入页面、每次签到/问诊后刷新（侧边栏与顶部徽标都用它）
   const refreshQuota = useCallback(async () => {
@@ -153,28 +157,35 @@ export default function ChatPage() {
 
   async function newSession() {
     if (streaming) { abortRef.current?.abort(); setStreaming(false); }
-    const { session } = await api.createSession('新问诊');
+    const { session } = await api.createSession(mod.name, mod.id);
     await refreshSessions();
     setActiveId(session.id);
     setMessages([]);
     setIntakeNote('');
-    setSessionTitle('新问诊');
+    setSessionTitle(session.title || mod.name);
     setSidebarOpen(false);
   }
 
   async function deleteSession(id) {
-    if (!confirm('确定删除该问诊记录？此操作不可恢复。')) return;
+    if (!confirm('确定删除该记录？此操作不可恢复。')) return;
     await api.deleteSession(id).catch(() => {});
     await refreshSessions();
     if (id === activeId) { setActiveId(null); setMessages([]); setIntakeNote(''); }
   }
 
-  // ---- intake pin (十问/舌象) ----
+  // ---- intake pin (问诊单/咨询背景) ----
   function applyIntake(summary) {
     setIntakeNote(summary);
     setShowIntake(false);
   }
   function removeIntake() { setIntakeNote(''); }
+
+  // 点建议词：把问题填进输入框并聚焦，让用户能直接改词后回车发送
+  // （旧实现只调 newSession()，界面上看不出任何变化，等于点了没反应）
+  function pickSuggestion(text) {
+    setInput(text);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
 
   // ---- send ----
   async function send() {
@@ -182,7 +193,7 @@ export default function ChatPage() {
     if (!content || streaming) return;
     let sid = activeId;
     if (!sid) {
-      const { session } = await api.createSession('新问诊');
+      const { session } = await api.createSession(mod.name, mod.id);
       sid = session.id;
       setActiveId(sid);
     }
@@ -210,6 +221,9 @@ export default function ChatPage() {
           // 服务端在 done 事件里带回最新额度，免去再发一次请求
           if (ev.quota) setQuota(ev.quota);
           break;
+        } else if (ev.type === 'tool') {
+          // 脚本运行提示（排盘/抽牌）：显示在占位气泡里
+          setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc || `> ⚙️ ${ev.label}运行中…` } : x)));
         } else if (ev.type === 'notice') {
           // 中间提示（如自动重启浏览器重试）：临时显示在占位气泡里
           setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc || `> 提示：${ev.text}` } : x)));
@@ -250,10 +264,14 @@ export default function ChatPage() {
   const activeSession = sessions.find((s) => s.id === activeId);
   // 额度/上限类错误 → 直接把用户引到「我的额度」面板（签到或订阅）
   const quotaBlocked = /额度|上限/.test(errNote);
+  const isTcm = mod.id === 'tcm';
+  const intakeLabel = isTcm ? '十问 / 舌象' : '咨询背景';
 
   return (
     <div className={`app-shell ${sidebarOpen ? 'sidebar-visible' : ''}`}>
       <Sidebar
+        module={mod}
+        onBackToPortal={onBackToPortal}
         sessions={sessions}
         activeId={activeId}
         onSelect={openSession}
@@ -271,14 +289,22 @@ export default function ChatPage() {
 
       <main className="main">
         <header className="main-header">
+          {/* 常驻返回入口：PWA 独立窗口没有浏览器返回键，窄屏侧栏又是抽屉式，
+              这里给一个所有尺寸都看得见的「回到模块门户」按钮 */}
+          <button className="icon-btn back-btn" onClick={onBackToPortal} title="返回模块门户" aria-label="返回模块门户">
+            <Icon name="arrow-left" size={20} />
+          </button>
           <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="菜单">
             <Icon name="menu" size={20} />
           </button>
           <div className="header-title">
-            <h1>{activeSession?.title || '新问诊'}</h1>
+            <h1>
+              <span className="module-chip" style={{ background: mod.color }}><Icon name={mod.icon} size={13} /> {mod.name}</span>
+              {activeSession?.title || mod.name}
+            </h1>
             {intakeNote && (
-              <button className="pin-chip" onClick={removeIntake} title="移除问诊摘要">
-                <Icon name="clipboard" size={13} /> 已附问诊摘要 <Icon name="close" size={12} />
+              <button className="pin-chip" onClick={removeIntake} title={`移除${intakeLabel}摘要`}>
+                <Icon name="clipboard" size={13} /> 已附{intakeLabel}摘要 <Icon name="close" size={12} />
               </button>
             )}
           </div>
@@ -292,19 +318,21 @@ export default function ChatPage() {
               {quota.unlimited ? '不限次' : `剩余 ${quota.credits}`}
             </button>
           )}
-          <button className="icon-btn" onClick={() => setShowIntake(true)} title="十问 / 舌象 快速问诊单" aria-label="问诊单">
-            <Icon name="stethoscope" size={20} />
-          </button>
+          {isTcm && (
+            <button className="icon-btn" onClick={() => setShowIntake(true)} title="十问 / 舌象 快速问诊单" aria-label="问诊单">
+              <Icon name="stethoscope" size={20} />
+            </button>
+          )}
         </header>
 
         <div className="chat-scroll" ref={scrollHostRef}>
           {loadingSession && messages.length === 0 ? (
             <div className="chat-loading">
               <div className="loading-spinner" />
-              <p>正在加载问诊记录…</p>
+              <p>正在加载记录…</p>
             </div>
           ) : messages.length === 0 && !streaming ? (
-            <EmptyState onIntake={() => setShowIntake(true)} onNew={newSession} />
+            <EmptyState mod={mod} onIntake={isTcm ? () => setShowIntake(true) : null} onNew={newSession} onPick={pickSuggestion} />
           ) : (
             <div className="msg-list">
               {(hasMore || (!renderAll && messages.length > RENDER_WINDOW)) && (
@@ -329,7 +357,7 @@ export default function ChatPage() {
                   if (streaming && m.id === messages[messages.length - 1]?.id) {
                     return (
                       <div key={m.id} className="msg assistant">
-                        <div className="msg-avatar">倪</div>
+                        <div className="msg-avatar" style={isTcm ? undefined : { background: mod.color }}>{mod.name.slice(0, 1)}</div>
                         <div className="msg-body typing-dots"><span /><span /><span /></div>
                       </div>
                     );
@@ -338,12 +366,14 @@ export default function ChatPage() {
                 }
                 return (
                   <div key={m.id} className={`msg ${m.role}`}>
-                    <div className="msg-avatar">{m.role === 'user' ? '你' : '倪'}</div>
+                    <div className="msg-avatar" style={isTcm || m.role === 'user' ? undefined : { background: mod.color }}>
+                      {m.role === 'user' ? '你' : mod.name.slice(0, 1)}
+                    </div>
                     <div className="msg-body">
                       {m.role === 'assistant' ? <MarkdownMessage content={m.content} /> : <div className="msg-plain">{m.content}</div>}
                       {m.role === 'assistant' && m.content && (
                         <p className="msg-tag">
-                          <Icon name="alert" size={13} /> 以上内容由 AI 生成，仅供中医学习参考，不构成医疗建议
+                          <Icon name="alert" size={13} /> {mod.disclaimer}
                         </p>
                       )}
                     </div>
@@ -371,19 +401,22 @@ export default function ChatPage() {
           )}
           <div className="composer">
             <textarea
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
               }}
-              placeholder={activeId ? '描述你的症状，或按倪师的思路问诊…' : '点击右上方问诊单，或直接描述症状…'}
+              placeholder={activeId ? mod.placeholder || `向「${mod.name}」提问…` : mod.emptyHint || `开始你的「${mod.name}」对话…`}
               rows={1}
             />
             <div className="composer-actions">
               <div className="composer-notes">
-                <button className="text-btn" onClick={() => setShowIntake(true)}>
-                  <Icon name="clipboard" size={14} /> 十问 / 舌象
-                </button>
+                {isTcm && (
+                  <button className="text-btn" onClick={() => setShowIntake(true)}>
+                    <Icon name="clipboard" size={14} /> 十问 / 舌象
+                  </button>
+                )}
               </div>
               {streaming ? (
                 <button className="stop-btn" onClick={stop} title="停止生成" aria-label="停止生成">
@@ -397,8 +430,8 @@ export default function ChatPage() {
             </div>
           </div>
           <p className="disclaimer">
-            本服务由 AI 生成，仅供中医学习与学术研究，不构成医疗诊断或治疗建议，请以执业医师意见为准。<br />
-            急危重症（胸痛、呼吸困难、大出血、昏迷、高热不退等）请立即拨打 120 或前往急诊。
+            {mod.disclaimer}<br />
+            本服务由 AI 生成，仅供学习与学术研究；请以现实专业人士意见为准。
           </p>
         </div>
       </main>
@@ -459,25 +492,27 @@ export default function ChatPage() {
   );
 }
 
-function EmptyState({ onIntake, onNew }) {
+function EmptyState({ mod, onIntake, onNew, onPick }) {
+  const isTcm = mod.id === 'tcm';
   return (
     <div className="empty">
-      <div className="empty-logo">医</div>
-      <h2>倪海厦中医问诊</h2>
-      <p className="empty-quote">「中医很简单，就是阴阳气血。你搞懂了，一通百通。」</p>
+      <div className="empty-logo" style={isTcm ? undefined : { background: mod.color }}>{mod.name.slice(0, 1)}</div>
+      <h2>{mod.name}</h2>
+      <p className="empty-quote">{mod.emptyQuote}</p>
       <div className="empty-actions">
-        <button className="btn-primary" onClick={onIntake}>
-          <Icon name="stethoscope" size={17} /> 填写问诊单
-        </button>
+        {isTcm && onIntake && (
+          <button className="btn-primary" onClick={onIntake}>
+            <Icon name="stethoscope" size={17} /> 填写问诊单
+          </button>
+        )}
         <button className="btn-ghost" onClick={onNew}>
-          <Icon name="plus" size={16} /> 新问诊
+          <Icon name="plus" size={16} /> 新对话
         </button>
       </div>
       <div className="suggestions">
-        <button onClick={() => onIntake()}>我感冒了，怕冷没汗</button>
-        <button onClick={() => onIntake()}>总是失眠，心慌</button>
-        <button onClick={() => onIntake()}>胃口不好，肚子胀</button>
-        <button onClick={() => onIntake()}>手脚冰凉，腰酸</button>
+        {mod.suggestions.map((s) => (
+          <button key={s} type="button" onClick={() => onPick?.(s)} title="点击填入输入框">{s}</button>
+        ))}
       </div>
     </div>
   );

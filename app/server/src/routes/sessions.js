@@ -1,13 +1,14 @@
 import {
-  createSession, listSessions, getSession, renameSession,
-  deleteSession, listMessages, listMessagesPage,
+  createSession, listSessions, getSession, renameSession, updateSessionPin,
+  deleteSession, listMessages, listMessagesPage, userHasModule,
 } from '../db.js';
+import { getModule, DEFAULT_MODULE } from '../modules/registry.js';
 import { sendError, clamp } from '../lib/validate.js';
 
 function ownSession(req, reply, id) {
   const s = getSession(id);
   if (!s || s.user_id !== req.user.id) {
-    sendError(reply, 'not_found', '问诊会话不存在', 404);
+    sendError(reply, 'not_found', '会话不存在', 404);
     return null;
   }
   return s;
@@ -21,9 +22,16 @@ export default async function sessionRoutes(fastify) {
   });
 
   fastify.post('/', auth, async (req, reply) => {
-    const title = clamp((req.body?.title || '新问诊').trim(), 40) || '新问诊';
+    const title = clamp((req.body?.title || '').trim(), 40);
     const pin = clamp(req.body?.pin || '', 2000);
-    const s = createSession(req.user.id, title, pin);
+    // 会话创建时绑定模块；默认中医（老行为）。开通校验在此做，避免聊天时才发现。
+    const moduleId = clamp(String(req.body?.module || DEFAULT_MODULE).trim(), 20);
+    const mod = getModule(moduleId);
+    if (!mod) return sendError(reply, 'bad_module', '未知模块', 400);
+    if (!userHasModule(req.user, moduleId)) {
+      return sendError(reply, 'module_locked', `「${mod.name}」模块未开通，请联系管理员开通。`, 403);
+    }
+    const s = createSession(req.user.id, title || mod.name, pin, moduleId);
     return reply.code(201).send({ session: getSession(s.id) });
   });
 
@@ -34,7 +42,7 @@ export default async function sessionRoutes(fastify) {
     // 传 before_id 向前翻页。all=1 保留旧行为（导出/兼容用）。
     const { limit, before_id: beforeId, all } = req.query || {};
     const base = {
-      session: { id: s.id, title: s.title, pin: s.pin, created_at: s.created_at },
+      session: { id: s.id, title: s.title, pin: s.pin, created_at: s.created_at, module: s.module || 'tcm' },
     };
     if (all === '1') {
       return { ...base, messages: listMessages(s.id, 2000), total: null, has_more: false };
@@ -46,8 +54,12 @@ export default async function sessionRoutes(fastify) {
   fastify.patch('/:id', auth, async (req, reply) => {
     const s = ownSession(req, reply, req.params.id);
     if (!s) return;
-    const title = clamp((req.body?.title || '').trim(), 40);
+    const b = req.body || {};
+    const title = clamp((b.title || '').trim(), 40);
     if (title) renameSession(s.id, title);
+    // pin（问诊单/咨询背景摘要）：前端 setSessionPin 发的就是这个字段，
+    // 之前这里只处理 title，导致固定的背景资料存不下来、每次都得随消息重发。
+    if (b.pin !== undefined) updateSessionPin(s.id, clamp(String(b.pin || ''), 2000));
     return { ok: true };
   });
 

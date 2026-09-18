@@ -3,12 +3,22 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import config from './config.js';
+import { MODULES } from './modules/registry.js';
+
+// defaultGrant 模块集合（中医）：站点开启即全员可用，无需逐个发牌
+const MODULE_DEFAULT_GRANTS = new Set(MODULES.filter((m) => m.defaultGrant).map((m) => m.id));
 
 fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
 
 export const db = new DatabaseSync(config.dbPath);
 db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = ON');
+
+// 数据库文件权限收敛为 0600（仅属主可读写）：库里有用户口令哈希、会话记录、
+// 站点密钥设置，同机其他系统用户不该能直接读走整个库。（Windows/容器挂载可能不支持，静默忽略）
+for (const f of [config.dbPath, `${config.dbPath}-wal`, `${config.dbPath}-shm`]) {
+  try { fs.chmodSync(f, 0o600); } catch { /* 平台不支持则跳过 */ }
+}
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
@@ -229,6 +239,31 @@ export function findUserByName(username) {
 }
 export function findUserById(id) {
   return db.prepare('SELECT id, username, created_at FROM users WHERE id = ?').get(id);
+}
+
+// 大小写不敏感查重（安全）：管理员判定 isAdminUser 是大小写不敏感的，
+// 若注册/改名只做精确查重，就能注册 ADMIN_USERNAME 的大小写变体拿到管理员权限。
+export function findUserByNameCI(name) {
+  const s = String(name || '').trim();
+  if (!s) return null;
+  return db.prepare('SELECT * FROM users WHERE lower(username) = lower(?)').get(s);
+}
+
+// 是否为「已配置但尚未注册」的管理员名的大小写变体（该名字保留给真管理员）
+export function isReservedAdminName(name) {
+  const admin = configuredAdminUsername();
+  if (!admin) return false;
+  const s = String(name || '').trim();
+  if (s === admin) return false; // 精确拼写：允许注册（这正是管理员本人的注册路径）
+  if (s.toLowerCase() !== admin.toLowerCase()) return false;
+  return true; // 仅大小写不同的变体 → 保留
+}
+
+// 启动自检：库里是否已存在大小写重复的账号（老库可能已中招）
+export function findCaseCollisions() {
+  return db.prepare(`
+    SELECT lower(username) AS lname, COUNT(*) AS n, GROUP_CONCAT(username, ' / ') AS names
+    FROM users GROUP BY lower(username) HAVING n > 1`).all();
 }
 
 // ---------- admin: users ----------
@@ -551,10 +586,10 @@ export function upsertProfile(userId, p) {
 }
 
 // ---------- sessions ----------
-export function createSession(userId, title = '新问诊', pin = '') {
+export function createSession(userId, title = '新问诊', pin = '', module = '') {
   const id = crypto.randomUUID();
-  db.prepare('INSERT INTO sessions (id, user_id, title, pin) VALUES (?,?,?,?)').run(id, userId, title, pin);
-  return { id, title, pin };
+  db.prepare('INSERT INTO sessions (id, user_id, title, pin, module) VALUES (?,?,?,?,?)').run(id, userId, title, pin, module);
+  return { id, title, pin, module };
 }
 export function listSessions(userId) {
   return db.prepare(`SELECT id, title, pin, created_at, updated_at,
@@ -685,6 +720,17 @@ CREATE TABLE IF NOT EXISTS credit_log (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_credit_user ON credit_log(user_id, id DESC);
+
+-- 玄枢模块开通：每个功能模块对用户单独开通（管理员控制 / 站点默认联动）
+CREATE TABLE IF NOT EXISTS user_modules (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  module_id TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  granted_by TEXT DEFAULT '',
+  granted_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, module_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_modules_user ON user_modules(user_id);
 `);
 
 // 老库补列（幂等）：额度与专属每日上限
@@ -694,6 +740,11 @@ if (!quotaUserCols.includes('credits')) {
 }
 if (!quotaUserCols.includes('daily_chat_limit')) {
   db.exec('ALTER TABLE users ADD COLUMN daily_chat_limit INTEGER');
+}
+
+// 会话所属模块（老库补列；空串 = 老数据/中医模块）
+if (!tableColumns('sessions').includes('module')) {
+  db.exec("ALTER TABLE sessions ADD COLUMN module TEXT NOT NULL DEFAULT ''");
 }
 
 // 数字型站点设置的读取（空串/未设置 → 默认值）
@@ -1043,4 +1094,89 @@ export function resolveQuota(userId) {
       daily_chat_limit: sub.daily_chat_limit, credits: sub.credits,
     } : null,
   };
+}
+
+// ================= 玄枢 · 模块开通 =================
+//
+// 每个功能模块对用户单独开通（user_modules 表）。
+// 站点级开关（settings.module_enabled_<id>）控制模块整体上下线：
+//   - 未设置时默认：tcm（中医）开启，其余关闭 —— 站点刚升级时行为与旧版一致。
+// 用户可用 = 站点开关开启 && 用户已开通（管理员始终可用已开启的站点模块）。
+
+export function getModuleSiteEnabled(moduleId) {
+  const raw = getSetting(`module_enabled_${moduleId}`);
+  if (raw !== null) return raw === 'true';
+  // 默认：中医开启（原始核心），其余模块默认关闭，由管理员逐个上线
+  return moduleId === 'tcm';
+}
+
+export function setModuleSiteEnabled(moduleId, enabled) {
+  setSetting(`module_enabled_${moduleId}`, enabled ? 'true' : 'false');
+}
+
+export function listModuleSiteEnabled() {
+  // 供前端/管理端一次取全量
+  const out = {};
+  for (const k of db.prepare("SELECT key FROM settings WHERE key LIKE 'module_enabled_%'").all()) {
+    out[k.key.replace('module_enabled_', '')] = k.value === 'true';
+  }
+  return out;
+}
+
+// 用户开通记录（map: moduleId -> { enabled, granted_at, granted_by }）
+export function listUserModules(userId) {
+  const rows = db.prepare('SELECT module_id, enabled, granted_by, granted_at FROM user_modules WHERE user_id = ?')
+    .all(userId);
+  const map = {};
+  for (const r of rows) map[r.module_id] = { enabled: Boolean(r.enabled), granted_by: r.granted_by, granted_at: r.granted_at };
+  return map;
+}
+
+export function grantUserModule(userId, moduleId, grantedBy = '') {
+  db.prepare(`INSERT INTO user_modules (user_id, module_id, enabled, granted_by, granted_at)
+    VALUES (?,?,1,?,datetime('now'))
+    ON CONFLICT(user_id, module_id) DO UPDATE SET enabled = 1, granted_by = excluded.granted_by, granted_at = datetime('now')`)
+    .run(userId, moduleId, grantedBy);
+}
+
+export function revokeUserModule(userId, moduleId) {
+  db.prepare('DELETE FROM user_modules WHERE user_id = ? AND module_id = ?').run(userId, moduleId);
+}
+
+export function bulkGrantUserModule(ids, moduleId, grantedBy = '') {
+  const stmt = db.prepare(`INSERT INTO user_modules (user_id, module_id, enabled, granted_by, granted_at)
+    VALUES (?,?,1,?,datetime('now'))
+    ON CONFLICT(user_id, module_id) DO UPDATE SET enabled = 1, granted_by = excluded.granted_by, granted_at = datetime('now')`);
+  db.exec('BEGIN');
+  try {
+    let n = 0;
+    for (const id of ids) { stmt.run(id, moduleId, grantedBy); n++; }
+    db.exec('COMMIT');
+    return n;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+// 管理端：某模块已开通的用户列表
+export function listModuleUsers(moduleId) {
+  return db.prepare(`
+    SELECT u.id, u.username, um.granted_at, um.granted_by
+    FROM user_modules um JOIN users u ON u.id = um.user_id
+    WHERE um.module_id = ? AND um.enabled = 1
+    ORDER BY um.granted_at DESC`).all(moduleId);
+}
+
+// 运行时判定：用户能否使用某模块。
+// 管理员：始终可用（全能视角 —— 站点开关只约束普通用户，管理员需要能进任何模块排查/试用）
+// defaultGrant 模块（中医）：站点开启即全员可用（站点的原始核心能力）。
+// 其他模块普通用户：站点开关 && 用户开通记录 enabled。
+export function userHasModule(user, moduleId) {
+  if (!user) return false;
+  if (isAdminUser(user)) return true;
+  if (!getModuleSiteEnabled(moduleId)) return false;
+  if (MODULE_DEFAULT_GRANTS.has(moduleId)) return true;
+  const row = db.prepare('SELECT enabled FROM user_modules WHERE user_id = ? AND module_id = ?').get(user.id, moduleId);
+  return Boolean(row && row.enabled);
 }

@@ -14,6 +14,13 @@ services:
       REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-}
       DB_PATH: /app/data/nihaixia.db
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      # 安全：容器化部署在 Caddy 反代之后，只信任紧邻的一跳代理。
+      # （若设成 true 会信任整条转发链，攻击者伪造 X-Forwarded-For 即可绕过登录限流）
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      # 安全：跨域默认关闭（同源即可正常使用）；确需跨域时在此列白名单
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      # 日志里是否记录每个请求（默认关，避免把请求细节写进日志）
+      LOG_REQUESTS: ${LOG_REQUESTS:-false}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       APP_VERSION: ${APP_VERSION:-1.0.0}
       # 「每日」类统计/限额按北京自然日（created_at 存储仍为 UTC 文本）

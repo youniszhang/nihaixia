@@ -59,6 +59,16 @@ const ICONS = {
   link: <><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 1 0-5.7-5.7L11.5 7" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 1 0 5.7 5.7L12.5 17" /></>,
   eye: <><path d="M2.5 12S6 6.5 12 6.5 21.5 12 21.5 12 18 17.5 12 17.5 2.5 12 2.5 12z" /><circle cx="12" cy="12" r="3" /></>,
   'file-text': <><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4" /><path d="M9 12h6" /><path d="M9 16h6" /></>,
+
+  // —— 玄枢模块 ——
+  bell: <><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6.5 2 6.5H4S6 14 6 9z" /><path d="M10 19a2.2 2.2 0 0 0 4 0" /></>,
+  lock: <><rect x="5.5" y="10.5" width="13" height="9.5" rx="2" /><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" /></>,
+  bagua: <><circle cx="12" cy="12" r="9" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none" /><circle cx="12" cy="7.5" r="1.2" fill="var(--bg, #fff)" stroke="none" /><circle cx="12" cy="16.5" r="1.2" fill="currentColor" stroke="none" /></>,
+  compass: <><circle cx="12" cy="12" r="9" /><path d="M15.5 8.5l-2.2 5.3-5.3 2.2 2.2-5.3z" /></>,
+  star: <path d="M12 3.5l2.5 5.4 5.9.7-4.4 4 1.2 5.9L12 16.6l-5.2 2.9 1.2-5.9-4.4-4 5.9-.7z" />,
+  heart: <path d="M12 20s-7.5-4.7-9-9.3C2 7.5 4 4.8 7 4.8c2 0 3.6 1.1 5 3.2 1.4-2.1 3-3.2 5-3.2 3 0 5 2.7 4 5.9-1.5 4.6-9 9.3-9 9.3z" />,
+  home: <><path d="M4 11l8-7 8 7" /><path d="M6 9.5V20h12V9.5" /><path d="M10 20v-6h4v6" /></>,
+  lotus: <><path d="M12 20c-2.5-1.6-4-4-4-7 0-2.5 1.5-5 4-7 2.5 2 4 4.5 4 7 0 3-1.5 5.4-4 7z" /><path d="M12 20c-4.5 0-8-2.5-9-6 2.3-.5 4.5 0 6.3 1.3" /><path d="M12 20c4.5 0 8-2.5 9-6-2.3-.5-4.5 0-6.3 1.3" /></>,
 };
 
 export const ICON_NAMES = Object.keys(ICONS);

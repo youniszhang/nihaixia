@@ -1,7 +1,7 @@
 {
-  "name": "中医问诊",
-  "short_name": "中医问诊",
-  "description": "经方派 AI 问诊助手：六经辨证、经方选药、十问舌象、体质档案",
+  "name": "玄枢",
+  "short_name": "玄枢",
+  "description": "玄枢 · 传统智慧 AI 工作台：中医问诊、八字紫微、奇门风水、塔罗佛学，八位先生各守一艺",
   "lang": "zh-CN",
   "start_url": "/",
   "scope": "/",

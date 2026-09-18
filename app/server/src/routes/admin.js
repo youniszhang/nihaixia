@@ -3,6 +3,7 @@ import { sendError, clamp } from '../lib/validate.js';
 import { openLoginWindow, checkLoginStatus, killBrowser, injectToken } from '../lib/dsweb.js';
 import { verifyToken } from '../lib/dsapi.js';
 import { startInAppLoginFlow, inAppLoginStatus } from './internal.js';
+import { redact } from '../lib/redact.js';
 
 function maskKey(key) {
   if (!key) return '';
@@ -42,7 +43,14 @@ export default async function adminRoutes(fastify) {
     if (b.model != null) setSetting('llm_model', clamp(b.model.trim(), 100));
     // Empty api_key = keep the existing one (frontend sends empty unless changed)
     if (typeof b.api_key === 'string' && b.api_key.trim()) {
-      setSetting('llm_api_key', b.api_key.trim());
+      const v = b.api_key.trim();
+      // 防误覆盖（安全）：若前端把掩码值（sk-1***abcd）回传，会把真实 Key 覆盖成掩码。
+      // 掩码只用于展示，不允许写入。
+      if (v.includes('****')) {
+        return sendError(reply, 'masked_key', 'API Key 不能提交掩码值（含 ****），请粘贴完整密钥或留空保持不变', 400);
+      }
+      if (v.length > 400) return sendError(reply, 'bad_key', 'API Key 过长', 400);
+      setSetting('llm_api_key', v);
     }
     if (b.dsweb_port != null && Number(b.dsweb_port) > 0) setSetting('dsweb_port', String(Number(b.dsweb_port)));
     if (b.dsweb_expert != null) setSetting('dsweb_expert', b.dsweb_expert ? 'true' : 'false');
@@ -71,7 +79,7 @@ export default async function adminRoutes(fastify) {
     try {
       return await openLoginWindow(port);
     } catch (err) {
-      return sendError(reply, 'dsweb_open_failed', (err.message || String(err)).slice(0, 200));
+      return sendError(reply, 'dsweb_open_failed', redact((err.message || String(err)).slice(0, 200)));
     }
   });
 
@@ -88,7 +96,7 @@ export default async function adminRoutes(fastify) {
       const res = await checkLoginStatus(port);
       return { ...res, mode: 'browser' };
     } catch (err) {
-      return sendError(reply, 'dsweb_check_failed', (err.message || String(err)).slice(0, 200));
+      return sendError(reply, 'dsweb_check_failed', redact((err.message || String(err)).slice(0, 200)));
     }
   });
 

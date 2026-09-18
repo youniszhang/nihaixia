@@ -8,7 +8,8 @@
 
 import {
   isAdminUser, listUsersWithStats, setUserStatus, setUserNote, setUserPassword,
-  renameUser, deleteUser, findUserById, findUserByName, createUser, getSetting, setSetting, deleteSetting,
+  renameUser, deleteUser, findUserById, findUserByName, findUserByNameCI, isReservedAdminName,
+  createUser, getSetting, setSetting, deleteSetting,
   getSession, adminListSessions, adminGetSessionMessages, adminSearchMessages,
   usageSummary, usageDaily, usageByUser, usageByProvider, usageUserDaily,
   bulkSetUserStatus, bulkDeleteUsers, addAudit, listAudit,
@@ -19,7 +20,12 @@ import {
   cancelSubscriptionById, applySubscription, pendingSubscription, expireSubscriptions,
   getCheckinSettings, checkinSummary, checkinDaily, listCheckins, listCreditLog,
   createInviteCode, listInviteCodes, setInviteCodeDisabled, deleteInviteCode, inviteRequired,
+  // 玄枢模块管理
+  getModuleSiteEnabled, setModuleSiteEnabled, listUserModules,
+  grantUserModule, revokeUserModule, bulkGrantUserModule, listModuleUsers,
 } from '../db.js';
+import { MODULES, getModule } from '../modules/registry.js';
+import { listModuleRequests } from './modules.js';
 import { hashPassword } from '../lib/password.js';
 import { isValidUsername, isValidPassword, sendError, clamp } from '../lib/validate.js';
 
@@ -31,6 +37,13 @@ function requireAdmin(req, reply) {
     return false;
   }
   return true;
+}
+
+// 查询参数里的正整数 ID：'' / undefined / NaN / 负数 / 非整数 → null（表示不加该过滤条件）
+function toPositiveIntOrNull(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0 ? n : null;
 }
 
 function isConfiguredAdmin(username) {
@@ -127,7 +140,9 @@ export default async function adminUserRoutes(fastify) {
     if (!isValidUsername(username)) return sendError(reply, 'bad_username', '用户名需 2-24 位（中英文、数字、下划线），或使用邮箱地址');
     if (!isValidPassword(password)) return sendError(reply, 'bad_password', '密码长度需 6-72 位');
     const name = username.trim();
-    if (findUserByName(name)) return sendError(reply, 'username_taken', '该用户名已被注册', 409);
+    // 大小写不敏感查重 + 保留名（与注册同源，避免「管理员后台能建出大小写变体管理员」）
+    if (findUserByNameCI(name)) return sendError(reply, 'username_taken', '该用户名已被注册', 409);
+    if (isReservedAdminName(name)) return sendError(reply, 'username_reserved', '该用户名与配置的管理员名仅大小写不同，已保留', 409);
     const hash = await hashPassword(password);
     const user = createUser(name, hash);
     if (note != null) setUserNote(user.id, clamp(String(note), 200));
@@ -164,7 +179,9 @@ export default async function adminUserRoutes(fastify) {
       if (!isValidUsername(name)) return sendError(reply, 'bad_username', '用户名需 2-24 位（中英文、数字、下划线），或使用邮箱地址');
       if (name !== target.username) {
         if (targetAdmin) return sendError(reply, 'admin_rename', '不能重命名管理员账号（请直接改 .env 的 ADMIN_USERNAME）');
-        const dup = findUserByName(name);
+        // 改名同样要防大小写变体：否则可把普通账号改成管理员名的大小写变体从而提权
+        if (isReservedAdminName(name)) return sendError(reply, 'username_reserved', '该用户名与配置的管理员名仅大小写不同，已保留', 409);
+        const dup = findUserByNameCI(name);
         if (dup && dup.id !== id) return sendError(reply, 'username_taken', '该用户名已被注册', 409);
         renameUser(id, name);
         changes.push(`改名 ${target.username} → ${name}`);
@@ -268,7 +285,8 @@ export default async function adminUserRoutes(fastify) {
   // ---------- 对话记录 ----------
   fastify.get('/conversations', admin, async (req, reply) => {
     if (!requireAdmin(req, reply)) return;
-    const userId = req.query?.user_id ? Number(req.query.user_id) : null;
+    // 严格解析：非法 user_id 不能悄悄退化成「不过滤=返回全部」
+    const userId = toPositiveIntOrNull(req.query?.user_id);
     const q = clamp(String(req.query?.q || '').trim(), 60);
     const limit = Math.min(Number(req.query?.limit) || 50, 200);
     const offset = Math.max(Number(req.query?.offset) || 0, 0);
@@ -445,7 +463,7 @@ export default async function adminUserRoutes(fastify) {
     const status = ['pending', 'active', 'rejected', 'expired', 'canceled'].includes(String(req.query?.status))
       ? String(req.query.status) : null;
     return {
-      subscriptions: listSubscriptions({ userId: req.query?.user_id ? Number(req.query.user_id) : null, status, limit: req.query?.limit }),
+      subscriptions: listSubscriptions({ userId: toPositiveIntOrNull(req.query?.user_id), status, limit: req.query?.limit }),
       stats: subscriptionStats(),
     };
   });
@@ -584,5 +602,122 @@ export default async function adminUserRoutes(fastify) {
     deleteInviteCode(id);
     addAudit({ actor: req.user, action: 'invite.delete', target: `#${id}`, detail: '' });
     return { ok: true };
+  });
+
+  // ================= 玄枢 · 模块管理 =================
+
+  // 模块总览：全部模块 + 站点开关 + 开通人数 + 待审批申请
+  fastify.get('/modules', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const requests = listModuleRequests().filter((r) => r.status === 'pending');
+    const modules = MODULES.map((m) => {
+      const users = listModuleUsers(m.id);
+      return {
+        id: m.id,
+        name: m.name,
+        tagline: m.tagline,
+        icon: m.icon,
+        color: m.color,
+        has_tool: Boolean(m.tools.length),
+        tool_name: m.toolName,
+        site_enabled: getModuleSiteEnabled(m.id),
+        open_mode: getSetting(`module_open_mode_${m.id}`) || 'apply',
+        granted_count: users.length,
+        pending_requests: requests.filter((r) => r.module_id === m.id).length,
+      };
+    });
+    return { modules, requests };
+  });
+
+  // 模块站点开关 / 申请模式
+  fastify.patch('/modules/:id', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const mod = getModule(String(req.params.id));
+    if (!mod) return sendError(reply, 'not_found', '模块不存在', 404);
+    const b = req.body || {};
+    const changes = [];
+    if (b.site_enabled != null) {
+      setModuleSiteEnabled(mod.id, Boolean(b.site_enabled));
+      changes.push(b.site_enabled ? '站点已上线' : '站点已下线（用户全部暂不可用）');
+      addAudit({
+        actor: req.user, action: 'module.site_toggle', target: mod.name,
+        detail: b.site_enabled ? '模块上线' : '模块下线',
+      });
+    }
+    if (b.open_mode != null && ['apply', 'auto'].includes(b.open_mode)) {
+      setSetting(`module_open_mode_${mod.id}`, b.open_mode);
+      changes.push(b.open_mode === 'auto' ? '开通方式：自助即开' : '开通方式：申请审批');
+    }
+    return { ok: true, changes };
+  });
+
+  // 某模块已开通用户列表
+  fastify.get('/modules/:id/users', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const mod = getModule(String(req.params.id));
+    if (!mod) return sendError(reply, 'not_found', '模块不存在', 404);
+    return { module: mod.id, users: listModuleUsers(mod.id) };
+  });
+
+  // 开通/撤销：单用户
+  fastify.post('/modules/:id/grant', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const mod = getModule(String(req.params.id));
+    if (!mod) return sendError(reply, 'not_found', '模块不存在', 404);
+    const id = Number(req.body?.user_id);
+    const target = findUserById(id);
+    if (!target) return sendError(reply, 'not_found', '用户不存在', 404);
+    grantUserModule(id, mod.id, req.user.username);
+    addAudit({ actor: req.user, action: 'module.grant', target: target.username, detail: `开通「${mod.name}」` });
+    return { ok: true };
+  });
+
+  fastify.post('/modules/:id/revoke', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const mod = getModule(String(req.params.id));
+    if (!mod) return sendError(reply, 'not_found', '模块不存在', 404);
+    const id = Number(req.body?.user_id);
+    const target = findUserById(id);
+    if (!target) return sendError(reply, 'not_found', '用户不存在', 404);
+    revokeUserModule(id, mod.id);
+    addAudit({ actor: req.user, action: 'module.revoke', target: target.username, detail: `撤销「${mod.name}」` });
+    return { ok: true };
+  });
+
+  // 批量开通：ids + module_id
+  fastify.post('/modules/grant-bulk', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const mod = getModule(String(req.body?.module_id || ''));
+    if (!mod) return sendError(reply, 'not_found', '模块不存在', 404);
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Number.isInteger) : [];
+    if (!ids.length) return sendError(reply, 'bad_request', '请选择要开通的用户');
+    const affected = bulkGrantUserModule(ids, mod.id, req.user.username);
+    addAudit({ actor: req.user, action: 'module.grant_bulk', target: `${affected} 个账号`, detail: `批量开通「${mod.name}」` });
+    return { ok: true, affected };
+  });
+
+  // 审批用户的开通申请：approve（并开通）/ reject
+  fastify.post('/module-requests/:id/review', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const reqId = String(req.params.id || '');
+    const decision = String(req.body?.decision || '');
+    if (!['approve', 'reject'].includes(decision)) return sendError(reply, 'bad_decision', 'decision 仅支持 approve/reject');
+    const requests = listModuleRequests();
+    const r = requests.find((x) => x.id === reqId);
+    if (!r) return sendError(reply, 'not_found', '申请不存在', 404);
+    if (r.status !== 'pending') return sendError(reply, 'already_reviewed', '该申请已处理', 400);
+    r.status = decision === 'approve' ? 'approved' : 'rejected';
+    r.reviewed_by = req.user.username;
+    r.reviewed_at = new Date().toISOString();
+    if (decision === 'approve') {
+      if (findUserById(r.user_id)) grantUserModule(r.user_id, r.module_id, req.user.username);
+    }
+    setSetting('module_requests', JSON.stringify(requests.slice(0, 500)));
+    const mod = getModule(r.module_id);
+    addAudit({
+      actor: req.user, action: `module.request_${decision}`, target: r.username,
+      detail: `${decision === 'approve' ? '批准' : '驳回'}「${mod?.name || r.module_id}」开通申请`,
+    });
+    return { ok: true, request: r };
   });
 }

@@ -4,15 +4,32 @@
 import { getSetting, setSetting } from '../db.js';
 import { injectToken } from '../lib/dsweb.js';
 import { verifyToken } from '../lib/dsapi.js';
+import crypto from 'node:crypto';
 
 const INTERNAL_TOKEN = process.env.INTERNAL_TOKEN || '';
+
+// 常量时间比较（安全）：避免逐字符比较的时序侧信道
+function tokenMatches(got) {
+  if (!INTERNAL_TOKEN || typeof got !== 'string' || !got) return false;
+  const a = Buffer.from(got);
+  const b = Buffer.from(INTERNAL_TOKEN);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+// 来源仅限本机回环（安全）：桌面版 Rust 启动器经 127.0.0.1 调用；
+// 而桌面版服务监听 0.0.0.0（为让手机 PWA 连入），不加这条则同一 Wi-Fi 下
+// 任何设备都能调用 /internal/dsweb-inject 写入任意 DeepSeek 凭证。
+function isLoopback(req) {
+  const ip = req.socket?.remoteAddress || '';
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
 
 // 应用内登录流程状态（单用户本地场景，内存态足够）
 export const loginFlow = { state: 'idle', startedAt: 0, result: null };
 
 export default async function internalRoutes(fastify) {
   fastify.addHook('onRequest', async (req, reply) => {
-    if (!INTERNAL_TOKEN || req.headers['x-internal-token'] !== INTERNAL_TOKEN) {
+    if (!isLoopback(req) || !tokenMatches(req.headers['x-internal-token'])) {
       return reply.code(403).send({ error: 'forbidden' });
     }
   });

@@ -66,10 +66,10 @@ export default function AuthPage() {
     <div className="auth-wrap">
       <div className="auth-hero" aria-hidden>
         <div className="auth-hero-inner">
-          <div className="auth-seal">医</div>
-          <h1>中医问诊</h1>
-          <p className="auth-quote">「中医很简单，就是阴阳气血。你搞懂了，一通百通。」</p>
-          <p className="auth-sub">经方派问诊 · 六经辨证 · 深入浅出</p>
+          <div className="auth-seal">玄</div>
+          <h1>玄枢</h1>
+          <p className="auth-quote">「观天之道，执天之行，尽矣。」</p>
+          <p className="auth-sub">八位先生，各守一艺 · 岐黄问诊 · 八字紫微 · 奇门风水 · 塔罗佛学</p>
         </div>
       </div>
 
@@ -144,9 +144,9 @@ export default function AuthPage() {
 
           <p className="auth-foot">
             {regOpen
-              ? <>问诊记录会自动保存在你的账户下。<br /></>
+              ? <>你的对话记录会自动保存在你的账户下。<br /></>
               : <>本站为邀请制，账号需管理员发放邀请码。<br /></>}
-            登录即代表你理解：本应用内容为中医学习研究之用，不构成医疗诊断。
+            登录即代表你理解：本应用各模块内容为传统文化学习研究之用，不构成医疗诊断或现实决策建议。
           </p>
         </form>
       </div>

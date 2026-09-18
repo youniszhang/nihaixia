@@ -8,6 +8,7 @@
 
 import { isAdminUser } from '../db.js';
 import { sendError } from '../lib/validate.js';
+import { redact } from '../lib/redact.js';
 
 function updaterCfg() {
   const url = (process.env.UPDATER_URL || '').replace(/\/+$/, '');
@@ -43,7 +44,7 @@ export default async function systemRoutes(fastify) {
       const r = await callUpdater(check ? '/status?check=1' : '/status', 'GET', check ? 40000 : 15000);
       return { enabled: true, ...(r.data || {}) };
     } catch (err) {
-      return { enabled: true, error: `无法连接更新服务：${(err.message || err).slice(0, 160)}` };
+      return { enabled: true, error: redact(`无法连接更新服务：${(err.message || err).slice(0, 160)}`) };
     }
   });
 
@@ -55,7 +56,7 @@ export default async function systemRoutes(fastify) {
       const r = await callUpdater('/update', 'POST');
       return r.data;
     } catch (err) {
-      return sendError(reply, 'updater_unreachable', `无法连接更新服务：${(err.message || err).slice(0, 160)}`, 502);
+      return sendError(reply, 'updater_unreachable', redact(`无法连接更新服务：${(err.message || err).slice(0, 160)}`), 502);
     }
   });
 
@@ -67,7 +68,7 @@ export default async function systemRoutes(fastify) {
       const r = await callUpdater('/restart', 'POST');
       return r.data;
     } catch (err) {
-      return sendError(reply, 'updater_unreachable', `无法连接更新服务：${(err.message || err).slice(0, 160)}`, 502);
+      return sendError(reply, 'updater_unreachable', redact(`无法连接更新服务：${(err.message || err).slice(0, 160)}`), 502);
     }
   });
 }

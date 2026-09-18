@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 倪海厦中医问诊 · 服务器部署脚本（宝塔 / 通用 Linux）
+# 玄枢 · 服务器部署脚本（宝塔 / 通用 Linux）
 #
 # 用法（服务器上执行）：
 #   bash <(curl -fsSL https://raw.githubusercontent.com/youniszhang/nihaixia/main/app/deploy/install.sh)
@@ -13,7 +13,7 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$APP_DIR"
 
 echo "========================================"
-echo " 倪海厦中医问诊 · 服务器部署"
+echo " 玄枢 · 服务器部署"
 echo " 目录: $APP_DIR"
 echo "========================================"
 

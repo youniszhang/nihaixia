@@ -7,18 +7,20 @@ import AdminReports from './admin/AdminReports.jsx';
 import AdminPlans from './admin/AdminPlans.jsx';
 import AdminSite from './admin/AdminSite.jsx';
 import AdminInvites from './admin/AdminInvites.jsx';
+import AdminModules from './admin/AdminModules.jsx';
 import AdminSettings from './AdminSettings.jsx';
 import SystemUpdate from './SystemUpdate.jsx';
 import Icon from './Icon.jsx';
 
-// 管理员独立后台：与用户问诊界面完全分离的全屏控制台。
-// 入口在侧边栏（仅管理员可见）。标签页：概览 / 用户 / 对话 / 报表 / 订阅与额度 / 模型 / 站点 / 系统。
+// 管理员独立后台：与用户界面完全分离的全屏控制台。
+// 入口在侧边栏（仅管理员可见）。标签页：概览 / 用户 / 对话 / 报表 / 订阅与额度 / 模块 / 邀请码 / 模型 / 站点 / 系统。
 const TABS = [
   { key: 'dashboard', label: '概览', icon: 'chart' },
   { key: 'users', label: '用户管理', icon: 'users' },
   { key: 'conversations', label: '对话记录', icon: 'message' },
   { key: 'reports', label: '使用报表', icon: 'trending' },
   { key: 'plans', label: '订阅与额度', icon: 'crown' },
+  { key: 'modules', label: '模块管理', icon: 'bagua' },
   { key: 'invites', label: '邀请码', icon: 'key' },
   { key: 'model', label: '模型设置', icon: 'settings' },
   { key: 'site', label: '站点设置', icon: 'wrench' },
@@ -92,6 +94,7 @@ export default function AdminConsole({ onClose, user }) {
           {tab === 'conversations' && <AdminConversations filter={convFilter} onClearFilter={() => setConvFilter(null)} />}
           {tab === 'reports' && <AdminReports />}
           {tab === 'plans' && <AdminPlans initialGrantFor={grantFor} onClearGrantFor={() => setGrantFor(null)} />}
+          {tab === 'modules' && <AdminModules />}
           {tab === 'invites' && <AdminInvites />}
           {tab === 'model' && <AdminSettings onClose={onClose} />}
           {tab === 'site' && <AdminSite />}

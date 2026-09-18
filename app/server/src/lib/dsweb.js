@@ -254,7 +254,10 @@ const SET_TEXT = `(function(){
 })()`;
 
 function buildSetTextJs(text) {
-  return SET_TEXT.replace('"__TEXT__"', JSON.stringify(text));
+  // 必须用函数形式替换：字符串形式的 replace 会把文本里的 $'、$`、$& 当作
+  // 替换模式展开，用户提问含 "$'" 时生成非法 JS，CDP 报 SyntaxError，
+  // 界面只显示「未能定位输入框」，掩盖真实原因。
+  return SET_TEXT.replace('"__TEXT__"', () => JSON.stringify(text));
 }
 
 /** 页面内拦截器：捕获 /chat/completion 的 SSE 原始流（JSON-Patch 流式） */

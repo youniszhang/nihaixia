@@ -212,6 +212,8 @@ fn main() {
                 let sea_cjs = res_dir.join("binaries").join("sea.cjs");
                 let knowledge = res_dir.join("knowledge");
                 let web_dist = res_dir.join("web-dist");
+                // 玄枢模块排盘/抽牌脚本（Python 由系统 PATH 提供，缺失时对应模块的脚本功能报错但聊天不受影响）
+                let xuanshu_scripts = res_dir.join("scripts").join("xuanshu");
 
                 if !node_bin.exists() || !sea_cjs.exists() {
                     report_status(&window, "未找到内置服务端文件（安装包损坏？）");
@@ -268,6 +270,7 @@ fn main() {
                     .env("HOST", "0.0.0.0")
                     .env("DB_PATH", data_dir.join("nihaixia.db"))
                     .env("KNOWLEDGE_DIR", &knowledge)
+                    .env("XUANSHU_SCRIPTS_DIR", &xuanshu_scripts)
                     .env("STATIC_DIR", &web_dist)
                     .env("APP_SECRET", secret)
                     .env("INTERNAL_TOKEN", &internal_token)

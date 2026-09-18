@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 倪海厦中医问诊 · 服务器部署（宝塔 / 通用 Linux，非交互）
+# 玄枢 · 服务器部署（宝塔 / 通用 Linux，非交互）
 #
 # 用法（服务器上执行）：
 #   NIHAIXIA_ENV_B64="$(base64 < .env)" bash server-deploy.sh

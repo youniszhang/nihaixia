@@ -120,7 +120,7 @@ export const api = {
 
   // sessions
   listSessions: () => request('/api/sessions'),
-  createSession: (title) => request('/api/sessions', { method: 'POST', body: { title } }),
+  createSession: (title, module = '') => request('/api/sessions', { method: 'POST', body: { title, module } }),
   // 历史会话按页拉取（长会话全量返回会明显变慢）；beforeId 用于向上翻页
   getSession: (id, { limit = 60, beforeId = null } = {}) => {
     const p = new URLSearchParams();
@@ -162,6 +162,19 @@ export const api = {
       }
     }
   },
+
+  // 玄枢模块
+  listModules: () => request('/api/modules'),
+  authorizeModule: (moduleId, note = '') => request('/api/modules/authorize', { method: 'POST', body: { module_id: moduleId, note } }),
+
+  // 管理后台：模块管理
+  adminModules: () => request('/api/admin/modules'),
+  adminPatchModule: (id, patch) => request(`/api/admin/modules/${id}`, { method: 'PATCH', body: patch }),
+  adminModuleUsers: (id) => request(`/api/admin/modules/${id}/users`),
+  adminGrantModule: (id, userId) => request(`/api/admin/modules/${id}/grant`, { method: 'POST', body: { user_id: userId } }),
+  adminRevokeModule: (id, userId) => request(`/api/admin/modules/${id}/revoke`, { method: 'POST', body: { user_id: userId } }),
+  adminGrantModuleBulk: (moduleId, ids) => request('/api/admin/modules/grant-bulk', { method: 'POST', body: { module_id: moduleId, ids } }),
+  adminReviewModuleRequest: (id, decision) => request(`/api/admin/module-requests/${id}/review`, { method: 'POST', body: { decision } }),
 };
 
 // 展示层用的流式错误（notice 提示 / error 终止）
