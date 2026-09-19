@@ -997,6 +997,25 @@ body {
   padding: 4px 0;
   color: var(--text);
   background: transparent;
+  overflow-y: hidden; /* 由 ChatPage 的 resizeInput 切换 auto/hidden，未超上限不出现滚动条 */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(44, 44, 44, 0.28) transparent;
+}
+
+.composer textarea::-webkit-scrollbar {
+  width: 10px;
+}
+
+.composer textarea::-webkit-scrollbar-thumb {
+  background: rgba(44, 44, 44, 0.22);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: 8px;
+}
+
+.composer textarea::-webkit-scrollbar-thumb:hover {
+  background: rgba(44, 44, 44, 0.4);
+  background-clip: padding-box;
 }
 
 .composer textarea::placeholder {
@@ -1623,9 +1642,11 @@ body {
   font-size: 0.75rem;
 }
 
-/* ===== Scrollbar ===== */
+/* ===== Scrollbar =====
+   视觉 ~6px，但拖拽热区 10px（border transparent + background-clip 让滑块好抓不显胖）。 */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
@@ -1634,11 +1655,20 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 3px;
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
+  background-clip: padding-box;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 
 .sidebar ::-webkit-scrollbar-thumb {
@@ -3990,3 +4020,13 @@ body {
 }
 
 .module-pick:hover { border-color: var(--mc, var(--red)); }
+
+/* 门户可用卡片：整卡可点（键盘可达），「进入」只是视觉引导 */
+.module-card[role='button'] { cursor: pointer; }
+
+.module-card[role='button']:focus-visible {
+  outline: 2px solid var(--mc);
+  outline-offset: 2px;
+}
+
+.module-enter-btn.busy { opacity: 0.6; }

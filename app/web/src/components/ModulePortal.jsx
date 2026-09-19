@@ -121,6 +121,13 @@ export default function ModulePortal({ user, catalog, onEnter, onMembership, onA
                   key={m.id}
                   className={`module-card ${locked ? 'locked' : ''} ${offline && !isAdmin ? 'offline' : ''}`}
                   style={{ '--mc': m.color }}
+                  {...(!locked ? {
+                    role: 'button',
+                    tabIndex: 0,
+                    'aria-label': `进入${m.name}`,
+                    onClick: () => enter(m),
+                    onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); enter(m); } },
+                  } : {})}
                 >
                   <span className="module-icon" style={{ background: m.color, ...(locked ? { filter: 'grayscale(0.55)', opacity: 0.6 } : {}) }}>
                     <Icon name={m.icon} size={26} />
@@ -135,9 +142,9 @@ export default function ModulePortal({ user, catalog, onEnter, onMembership, onA
                   {src && <span className={`module-src ${src.cls}`}>{src.text}</span>}
 
                   {!locked ? (
-                    <button className="module-enter-btn" onClick={() => enter(m)} disabled={busyId === m.id}>
-                      进入 <Icon name="arrow-right" size={14} />
-                    </button>
+                    <span className={`module-enter-btn ${busyId === m.id ? 'busy' : ''}`}>
+                      {busyId === m.id ? '进入中…' : <>进入 <Icon name="arrow-right" size={14} /></>}
+                    </span>
                   ) : offline ? (
                     <span className="module-lock-note">该模块尚未上线，敬请期待</span>
                   ) : (

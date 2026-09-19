@@ -52,6 +52,25 @@ export default function ChatPage({ module, onBackToPortal }) {
   const abortRef = useRef(null);
   const scrollHostRef = useRef(null);
   const inputRef = useRef(null);
+  const inputPastedRef = useRef(false);
+
+  // 输入框自适应高度（对齐 DeepSeek 官网手感）：
+  //   - 随内容长高，超过上限（200px）后转为内部滚动；
+  //   - 粘贴大段文字时视图锚到末尾（光标处），避免内容在 1 行小框里乱跳、首行被截一半。
+  const resizeInput = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const MAX = 200;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, MAX)}px`;
+    const overflow = el.scrollHeight > MAX + 1;
+    el.style.overflowY = overflow ? 'auto' : 'hidden';
+    if (overflow && inputPastedRef.current) {
+      el.scrollTop = el.scrollHeight; // 粘贴后光标在末尾，让用户看到刚贴进去的部分
+      inputPastedRef.current = false;
+    }
+  }, []);
+  useEffect(() => { resizeInput(); }, [input, resizeInput]);
   const listRef = useRef(sessions);
   listRef.current = sessions;
   // 会话消息缓存：点历史先出内容再静默刷新，避免闪空状态（"看起来像弹回新问诊"）
@@ -402,6 +421,7 @@ export default function ChatPage({ module, onBackToPortal }) {
           <div className="composer">
             <textarea
               ref={inputRef}
+              onPaste={() => { inputPastedRef.current = true; requestAnimationFrame(resizeInput); }}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
