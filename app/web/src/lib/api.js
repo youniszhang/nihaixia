@@ -176,6 +176,8 @@ export const api = {
   adminGrantModuleBulk: (moduleId, ids) => request('/api/admin/modules/grant-bulk', { method: 'POST', body: { module_id: moduleId, ids } }),
   adminReviewModuleRequest: (id, decision) => request(`/api/admin/module-requests/${id}/review`, { method: 'POST', body: { decision } }),
   adminDefaultModules: (modules) => request('/api/admin/modules-defaults', { method: 'PUT', body: { modules } }),
+  adminCapacity: () => request('/api/admin/capacity'),
+  adminSetCapacity: (t) => request('/api/admin/capacity', { method: 'PUT', body: t }),
 };
 
 // 展示层用的流式错误（notice 提示 / error 终止）

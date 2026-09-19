@@ -13,6 +13,10 @@ fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
 export const db = new DatabaseSync(config.dbPath);
 db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = ON');
+// 写并发防御：同进程内本来串行，这里主要防外部工具（updater/手工 sqlite3）同时写库时报 BUSY
+db.exec('PRAGMA busy_timeout = 5000');
+// 建议检查点阈值，避免 WAL 无限膨胀（默认 1000 页已经合理，这里显式声明）
+db.exec('PRAGMA wal_autocheckpoint = 1000');
 
 // 数据库文件权限收敛为 0600（仅属主可读写）：库里有用户口令哈希、会话记录、
 // 站点密钥设置，同机其他系统用户不该能直接读走整个库。（Windows/容器挂载可能不支持，静默忽略）

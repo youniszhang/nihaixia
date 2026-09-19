@@ -4051,3 +4051,22 @@ body {
 }
 
 .module-enter-btn.busy { opacity: 0.6; }
+
+/* ===== 容量保护卡（站点设置） ===== */
+.cap-gauges { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+
+.cap-gauge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card);
+  font-size: 0.84rem;
+  color: var(--text-dim);
+}
+
+.cap-gauge b { color: var(--text); font-size: 0.95rem; }
+
+.cap-form .field-row { display: flex; gap: 12px; flex-wrap: wrap; }

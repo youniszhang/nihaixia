@@ -19,16 +19,22 @@ import systemRoutes from './routes/system.js';
 import moduleRoutes from './routes/modules.js';
 import { loadKnowledge } from './knowledge/loader.js';
 import { redact } from './lib/redact.js';
+import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 
 export async function startServer() {
   // 代理信任（安全）：默认不信任任何代理头 —— 若信任，攻击者可用伪造的
-  // X-Forwarded-For 每次换一个 IP，把登录限流完全绕过（已实测）。因此：
-  //   本机/桌面（无代理）        → 不设或 TRUST_PROXY=false，req.ip 取 socket 地址（不可伪造）
-  //   容器/宝塔反代（单跳）      → TRUST_PROXY=1，只信任紧邻的一跳
-  const trustProxyEnv = process.env.TRUST_PROXY;
-  const trustProxy = trustProxyEnv === undefined || trustProxyEnv === ''
+  // X-Forwarded-For 每次换一个 IP，把登录限流完全绕过（已实测）。
+  // 取值为 proxy-addr 令牌（逗号分隔），按部署拓扑选：
+  //   宝塔/同机 nginx 反代（socket=127.0.0.1） → TRUST_PROXY=loopback
+  //   docker compose（Caddy 走网桥，socket=172.x 私网） → TRUST_PROXY=loopback,uniquelocal
+  //   桌面/直连（无代理） → 不设（false），req.ip 取 socket 地址，伪造 XFF 无效
+  // 注意：不要用数字形式 —— Fastify v5 下 trustProxy: 1 实测不会从 XFF 解析 req.ip（恒为 socket），
+  // 'true' 会信任整条链路（可被伪造），仅调试用。
+  const trustProxyEnv = (process.env.TRUST_PROXY || '').trim();
+  const KNOWN = /^(loopback|linklocal|uniquelocal|true|false)(\s*,\s*(loopback|linklocal|uniquelocal))*$/i;
+  const trustProxy = trustProxyEnv === '' || trustProxyEnv === 'false'
     ? false
-    : (trustProxyEnv === 'true' ? true : Number(trustProxyEnv) || false);
+    : (KNOWN.test(trustProxyEnv) ? trustProxyEnv : (trustProxyEnv === 'true' ? true : false));
 
   const app = Fastify({
     logger: { level: process.env.LOG_LEVEL || 'info' },
@@ -113,7 +119,22 @@ export async function startServer() {
   await app.register(systemRoutes, { prefix: '/api/system' });
   await app.register(internalRoutes, { prefix: '/internal' });
 
-  app.get('/health', async () => ({ ok: true, ts: new Date().toISOString(), version: process.env.APP_VERSION || 'dev' }));
+  // 事件循环延迟观测（压测/容量水位用）：直方图每 500ms 采样一次
+  const elag = monitorEventLoopDelay({ resolution: 20 });
+  elag.enable();
+  app.get('/health', async () => {
+    const mem = process.memoryUsage();
+    return {
+      ok: true,
+      ts: new Date().toISOString(),
+      version: process.env.APP_VERSION || 'dev',
+      rss_mb: Math.round(mem.rss / 1024 / 1024),
+      heap_mb: Math.round(mem.heapUsed / 1024 / 1024),
+      uptime_s: Math.round(process.uptime()),
+      elag_p50_ms: Number((elag.mean / 1e6).toFixed(1)),
+      elag_p99_ms: Number((elag.percentile(99) / 1e6).toFixed(1)),
+    };
+  });
 
   // 桌面模式：本地服务端直接托管前端静态文件（服务器部署时由 Caddy 托管）
   if (process.env.STATIC_DIR) {

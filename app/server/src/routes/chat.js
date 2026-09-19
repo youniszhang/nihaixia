@@ -7,6 +7,7 @@ import { MODULE_PROMPTS } from '../modules/prompts.js';
 import { getModule, detectBoostDirs } from '../modules/registry.js';
 import { baziPaiPan, tarotDraw, qimenPaiPan } from '../modules/tools.js';
 import { streamChat } from '../llm.js';
+import { acquireGenerationSlot, release as releaseCapacity, capacityStats } from '../lib/capacity.js';
 import { connectDeepSeek, askStream, killBrowser, findBrowserBinary } from '../lib/dsweb.js';
 import { askDirect } from '../lib/dsapi.js';
 import config from '../config.js';
@@ -148,6 +149,28 @@ export default async function chatRoutes(fastify) {
     const heartbeat = setInterval(() => reply.raw.write(': ping\n\n'), 15000);
     const abortController = new AbortController();
     req.raw.on('close', () => { clearInterval(heartbeat); abortController.abort(); });
+
+    // —— 容量保护：并发生成超过保守阈值时进入 FIFO 排队，前端实时显示排位 ——
+    //    （阈值管理员可调；默认并发 300 / 队列 500 / 单次排队上限 45s）
+    let capacityTicket = null;
+    try {
+      capacityTicket = await acquireGenerationSlot(req.user.id, {
+        signal: abortController.signal,
+        onQueued: (position, estWaitSec) => sse(reply, { type: 'queue', position, est_wait_s: estWaitSec }),
+      });
+    } catch (capErr) {
+      clearInterval(heartbeat);
+      const code = capErr.code || 'busy';
+      const msg = code === 'queue_full'
+        ? '当前使用人数已达瞬时上限，服务器正满负荷运行，请 1-2 分钟后再试。'
+        : code === 'queue_timeout'
+          ? `${capErr.message}（你的排队请求已释放，未扣除额度）`
+          : '请求已取消。';
+      sse(reply, { type: 'error', code, message: msg, retry_after_s: capErr.retryAfterS || 60 });
+      // 用户消息保留（刷新可见「发了但未生成」），不扣额度、不写 usage
+      reply.raw.end();
+      return;
+    }
 
     // Build conversation
     const history = [];
@@ -363,6 +386,8 @@ export default async function chatRoutes(fastify) {
       }
     } finally {
       clearInterval(heartbeat);
+      // 容量名额归还：成功/失败/客户端断开三条路都从这里出，必须释放给排队的请求
+      if (capacityTicket) releaseCapacity();
       reply.raw.end();
     }
   });

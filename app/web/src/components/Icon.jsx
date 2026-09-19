@@ -63,6 +63,7 @@ const ICONS = {
   // —— 玄枢模块 ——
   bell: <><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6.5 2 6.5H4S6 14 6 9z" /><path d="M10 19a2.2 2.2 0 0 0 4 0" /></>,
   'user-plus': <><circle cx="10" cy="8" r="3.2" /><path d="M3 20a7 7 0 0 1 14 0" /><path d="M19 6v6" /><path d="M16 9h6" /></>,
+  gauge: <><path d="M12 21a9 9 0 1 1 9-9" /><path d="M12 12l4.5-4.5" /><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none" /><path d="M17 21h4" /></>,
   lock: <><rect x="5.5" y="10.5" width="13" height="9.5" rx="2" /><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" /></>,
   bagua: <><circle cx="12" cy="12" r="9" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none" /><circle cx="12" cy="7.5" r="1.2" fill="var(--bg, #fff)" stroke="none" /><circle cx="12" cy="16.5" r="1.2" fill="currentColor" stroke="none" /></>,
   compass: <><circle cx="12" cy="12" r="9" /><path d="M15.5 8.5l-2.2 5.3-5.3 2.2 2.2-5.3z" /></>,

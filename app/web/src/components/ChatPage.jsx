@@ -260,6 +260,9 @@ export default function ChatPage({ module, onBackToPortal }) {
           // 服务端在 done 事件里带回最新额度，免去再发一次请求
           if (ev.quota) setQuota(ev.quota);
           break;
+        } else if (ev.type === 'queue') {
+          // 容量保护排队：显示实时排位与预计等待（不扣额度，等到了就自动开始生成）
+          setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc || `⏳ 当前使用人数较多，排队中 第 ${ev.position} 位 · 预计约 ${ev.est_wait_s} 秒` } : x)));
         } else if (ev.type === 'tool') {
           // 脚本运行提示（排盘/抽牌）：显示在占位气泡里
           setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc || `> ⚙️ ${ev.label}运行中…` } : x)));

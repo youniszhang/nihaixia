@@ -26,6 +26,7 @@ import {
   getDefaultModules, setDefaultModules, parseModuleIds,
 } from '../db.js';
 import { MODULES, MODULE_IDS, getModule } from '../modules/registry.js';
+import { capacityStats, setCapacityThresholds } from '../lib/capacity.js';
 import { listModuleRequests } from './modules.js';
 import { hashPassword } from '../lib/password.js';
 import { isValidUsername, isValidPassword, sendError, clamp } from '../lib/validate.js';
@@ -612,6 +613,28 @@ export default async function adminUserRoutes(fastify) {
   });
 
   // ================= 玄枢 · 模块管理 =================
+
+  // 容量保护：实时水位 + 阈值读取/设置
+  fastify.get('/capacity', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    return capacityStats();
+  });
+
+  fastify.put('/capacity', admin, async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const b = req.body || {};
+    const t = setCapacityThresholds({
+      maxConcurrent: b.max_concurrent,
+      queueMax: b.queue_max,
+      queueTimeoutS: b.queue_timeout_s,
+    });
+    addAudit({
+      actor: req.user, action: 'capacity.thresholds',
+      target: `并发 ${t.max_concurrent} / 队列 ${t.queue_max} / 排队超时 ${t.queue_timeout_s}s`,
+      detail: '更新容量保护阈值',
+    });
+    return { ok: true, ...t, ...capacityStats() };
+  });
 
   // 模块总览：全部模块 + 站点开关 + 开通人数 + 待审批申请
   fastify.get('/modules', admin, async (req, reply) => {

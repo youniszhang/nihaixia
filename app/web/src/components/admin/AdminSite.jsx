@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api.js';
 import Icon from '../Icon.jsx';
 
@@ -59,6 +59,7 @@ export default function AdminSite() {
 
   return (
     <div className="admin-site">
+        <CapacityCard />
       <section className="admin-section">
         <h3><Icon name="user" size={16} /> 用户注册</h3>
         <div className="setting-row">
@@ -331,5 +332,88 @@ function AuditLog() {
         </tbody>
       </table>
     </section>
+  );
+}
+
+// —— 容量保护：实时水位 + 保守阈值（超过并发上限自动排队，队满/超时给出等待提示）——
+function CapacityCard() {
+  const [stats, setStats] = useState(null);
+  const [form, setForm] = useState(null);
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const d = await api.adminCapacity();
+      setStats(d);
+      setForm({ max_concurrent: d.max_concurrent, queue_max: d.queue_max, queue_timeout_s: d.queue_timeout_s });
+    } catch (e) { setErr(e.message); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  // 实时水位 3s 一刷
+  useEffect(() => {
+    const t = setInterval(async () => {
+      try { const d = await api.adminCapacity(); setStats(d); } catch {}
+    }, 3000);
+    return () => clearInterval(t);
+  }, []);
+
+  async function save(e) {
+    e.preventDefault();
+    setBusy(true); setErr(''); setMsg('');
+    try {
+      const d = await api.adminSetCapacity({
+        max_concurrent: Number(form.max_concurrent),
+        queue_max: Number(form.queue_max),
+        queue_timeout_s: Number(form.queue_timeout_s),
+      });
+      setStats(d); setForm({ max_concurrent: d.max_concurrent, queue_max: d.queue_max, queue_timeout_s: d.queue_timeout_s });
+      setMsg('容量阈值已更新');
+      setTimeout(() => setMsg(''), 3500);
+    } catch (e2) { setErr(e2.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="admin-section">
+      <h3><Icon name="gauge" size={16} /> 容量保护（超过并发上限自动排队）</h3>
+      {stats && (
+        <div className="cap-gauges">
+          <span className="cap-gauge">正在生成 <b>{stats.active}</b> / {stats.max_concurrent}</span>
+          <span className="cap-gauge">排队中 <b>{stats.queued}</b> / {stats.queue_max}</span>
+        </div>
+      )}
+      {form && (
+        <form className="cap-form" onSubmit={save}>
+          <div className="field-row">
+            <label className="field">
+              <span>最大并发生成数 <small>（超过则排队）</small></span>
+              <input type="number" min="1" max="5000" value={form.max_concurrent}
+                onChange={(e) => setForm((f) => ({ ...f, max_concurrent: e.target.value }))} />
+            </label>
+            <label className="field">
+              <span>排队队列上限 <small>（超过直接提示稍后再试）</small></span>
+              <input type="number" min="0" max="5000" value={form.queue_max}
+                onChange={(e) => setForm((f) => ({ ...f, queue_max: e.target.value }))} />
+            </label>
+            <label className="field">
+              <span>单次排队上限（秒）</span>
+              <input type="number" min="3" max="600" value={form.queue_timeout_s}
+                onChange={(e) => setForm((f) => ({ ...f, queue_timeout_s: e.target.value }))} />
+            </label>
+          </div>
+          <p className="admin-hint">
+            保守阈值建议：按部署规格设「并发生成」上限（1C2G 建议 50～100，2C4G 建议 150～300），
+            队列上限设为并发的 1～2 倍。超出的请求会先排队并显示「第 N 位」，排队超时或队满时提示稍后再试（不扣额度）。
+          </p>
+          {msg && <p className="sheet-msg">{msg}</p>}
+          {err && <p className="auth-error">{err}</p>}
+          <button className="btn-primary" disabled={busy || !stats}>
+            {busy ? '保存中…' : '保存容量阈值'}
+          </button>
+        </form>
+      )}
+    </div>
   );
 }
