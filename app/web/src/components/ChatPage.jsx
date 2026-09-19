@@ -71,6 +71,26 @@ export default function ChatPage({ module, onBackToPortal }) {
     }
   }, []);
   useEffect(() => { resizeInput(); }, [input, resizeInput]);
+
+  // 移动端键盘抬升（iOS 专用兜底，Android 走 viewport 的 interactive-widget=resizes-content）：
+  // iOS PWA/Safari 弹键盘时布局视口不变、可视视口缩小，固定在底部的输入框会被键盘盖住。
+  // 这里把「键盘高度」算出来写进 CSS 变量，输入框所在容器用它抬高自己。
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return undefined;
+    const apply = () => {
+      const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      document.documentElement.style.setProperty('--kb-inset', `${Math.round(overlap)}px`);
+    };
+    vv.addEventListener('resize', apply);
+    vv.addEventListener('scroll', apply);
+    apply();
+    return () => {
+      vv.removeEventListener('resize', apply);
+      vv.removeEventListener('scroll', apply);
+      document.documentElement.style.setProperty('--kb-inset', '0px');
+    };
+  }, []);
   const listRef = useRef(sessions);
   listRef.current = sessions;
   // 会话消息缓存：点历史先出内容再静默刷新，避免闪空状态（"看起来像弹回新问诊"）
