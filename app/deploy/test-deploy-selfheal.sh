@@ -168,9 +168,18 @@ grep -q "===== 部署成功 =====" <<<"$LAST_OUT" && bad "仍报完全成功" ||
 echo ""
 echo "======== 回退法：分别隔离验证两个缺陷（证明断言有牙）========"
 OLD="$SB/old-server-deploy.sh"
-if ! git -C "$REPO_ROOT" show HEAD:app/deploy/server-deploy.sh > "$OLD" 2>/dev/null; then
-  bad "无法从 git 取旧版脚本（跳过回退验证）"
-else
+# 用「引入本修复的那个提交」作为旧版基线，而不是 HEAD —— 否则修复提交之后，
+# HEAD:app/deploy/server-deploy.sh 与当前工作文件同为修复版，回退验证会失去意义。
+# 找法：本文件所在目录中，最近一次修改 server-deploy.sh 的提交的前一个版本。
+OLD_REF="$(git -C "$REPO_ROOT" log --format=%H -1 -- app/deploy/server-deploy.sh 2>/dev/null)"
+if [ -z "$OLD_REF" ]; then
+  bad "无法定位 server-deploy.sh 的历史提交（跳过回退验证）"
+elif ! git -C "$REPO_ROOT" show "${OLD_REF}^:app/deploy/server-deploy.sh" > "$OLD" 2>/dev/null; then
+  # 该脚本可能自诞生起就没改过 → 没有「修复前」版本可比，属正常情况
+  echo "  （server-deploy.sh 只有一次提交记录，无修复前版本可比，跳过回退验证）"
+  : > "$OLD"
+fi
+if [ -s "$OLD" ]; then
   # 说明：旧版还有个 macOS bash 3.2 才会触发的解析缺陷（`$rc）`/`$PORT，` 这类
   # 「变量名后紧跟全角标点」会把标点的首字节吃进变量名，触发 unbound variable）。
   # 那是另一个 bug，会掩盖本测试要验证的探针缺陷；所以给旧版打最小 ${} 兼容补丁，
