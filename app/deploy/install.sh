@@ -113,14 +113,25 @@ echo ""
 echo "▶ 等待服务就绪…"
 # 注意：不能 curl /health —— Caddy 只代理 /api/*，/health 会落到 SPA 静态文件返回 200（假阳性）。
 # 改为等 api 容器 healthcheck 报 healthy，再请求真实 API 路径确认链路。
+#
+# 探针只信 3 位状态码：curl 失败时 `curl ... || echo 000` 会输出 "000000"，
+# 与 `= "000"` 的比较永远不成立（2026-09-19 在 server-deploy.sh 上踩过）。
+probe_code() {
+  local out
+  out="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$1" 2>/dev/null || true)"
+  case "$out" in
+    [1-5][0-9][0-9]) printf '%s' "$out" ;;
+    *) printf '000' ;;
+  esac
+}
 PORT="${HTTP_PORT:-18080}"
 READY=0
 for i in $(seq 1 60); do
   CID="$($DC ps -q api 2>/dev/null | head -1)"
   if [ -n "$CID" ] && [ "$(docker inspect --format '{{.State.Health.Status}}' "$CID" 2>/dev/null)" = "healthy" ]; then
-    CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/sessions" 2>/dev/null || echo 000)"
+    CODE="$(probe_code "http://127.0.0.1:$PORT/api/sessions")"
     if [ "$CODE" = "200" ] || [ "$CODE" = "401" ]; then
-      echo "✅ 服务已就绪（/api/sessions → HTTP $CODE）"
+      echo "✅ 服务已就绪（/api/sessions → HTTP ${CODE}）"
       READY=1
       break
     fi

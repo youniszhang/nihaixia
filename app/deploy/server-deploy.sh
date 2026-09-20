@@ -18,6 +18,21 @@ APP_DIR="$REPO_DIR/app"
 
 log() { echo "[$(date '+%F %T')] $*"; }
 
+# ---- HTTP 探针：只信 3 位状态码 ----
+# curl 连接失败时会输出 "000" 且退出码非零；若写成 `curl ... || echo 000`，
+# 两者会被拼接成 "000000"，让 `[ "$code" = "000" ]` 这类判断失效——
+# 2026-09-19 01:32 的部署就因此把「连接全断」误报成「✅ 链路恢复（HTTP 000000）」。
+probe_code() {
+  local out
+  out="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$1" 2>/dev/null || true)"
+  case "$out" in
+    [1-5][0-9][0-9]) printf '%s' "$out" ;;
+    *) printf '000' ;;
+  esac
+}
+
+API_PROBE_URL() { echo "http://127.0.0.1:$PORT/api/sessions"; }
+
 log "===== nihaixia 服务器部署开始 ====="
 
 # ---- 1. 环境检查 ----
@@ -99,25 +114,62 @@ else
   $DC up -d --build --remove-orphans || rc=$?
 fi
 if [ "$rc" -ne 0 ]; then
-  log "❌ 构建/启动失败（exit=$rc）"
+  log "❌ 构建/启动失败（exit=${rc}）"
   # 已发生过的事故（2026-09-17 及此前多次）：compose 重建 web 时报
   # "No such container: <id>" —— 旧容器已删、新容器被 docker 丢弃，
   # 18080 无人监听，整站 502 且无人补救。这里单独补起 web 再复查。
-  log "↩  尝试单独补起入口容器 web…"
+  #
+  # 2026-09-19 两次实测的失败形态（都在这一步）：
+  #   ① No such image: app-updater:latest（updater 建了镜像却没打上 tag）
+  #   ② Conflict. The container name "/app-updater-1" is already in use（旧容器没清干净）
+  # 两者重跑一次即可；故这里是「清理 + 重试」，不是直接放弃。
+  log "↩  清理可能残留的 updater 容器并重试一次…"
+  stale="$($DC --profile updater ps -aq updater 2>/dev/null || true)"
+  if [ -n "$stale" ]; then
+    # shellcheck disable=SC2086
+    docker rm -f $stale >/dev/null 2>&1 || true
+    log "   已清理残留容器: $(echo $stale | tr '\n' ' ')"
+  fi
+  rc2=0
+  if grep -q '^UPDATER_TOKEN=' .env 2>/dev/null; then
+    $DC --profile updater up -d --build --remove-orphans || rc2=$?
+  else
+    $DC up -d --build --remove-orphans || rc2=$?
+  fi
+  if [ "$rc2" -eq 0 ]; then log "✅ 重试后构建/启动成功"; else log "⚠️ 重试仍失败（exit=${rc2}），继续恢复入口容器"; fi
+
+  log "↩  复查入口容器 web…"
   $DC up -d web 2>&1 | tail -5
-  code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/sessions" 2>/dev/null || echo 000)"
+  code="$(probe_code "$(API_PROBE_URL)")"
   for i in $(seq 1 12); do
     [ "$code" != "000" ] && break
     sleep 5
-    code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/sessions" 2>/dev/null || echo 000)"
+    code="$(probe_code "$(API_PROBE_URL)")"
   done
   if [ "$code" = "000" ]; then
-    log "❌ 补起 web 后仍无法连接 http://127.0.0.1:$PORT"
+    log "❌ 无法连接 $(API_PROBE_URL)"
     $DC ps -a 2>&1 | tail -20
     exit 1
   fi
-  log "✅ 经自愈后链路恢复（/api/sessions → HTTP $code）"
+  log "✅ 经自愈后链路恢复（/api/sessions → HTTP ${code}）"
   $DC ps 2>&1 | tail -10
+
+  # 站点可用 ≠ 全部就绪。2026-09-19 01:32 的教训：updater 容器没起来（镜像缺 tag），
+  # 但自愈分支只看入口探针就打了「部署成功」，十小时后才发现「一键更新」一直 fetch failed。
+  # 这里显式复查 updater，缺失就如实报「部分成功」并以非零码退出，别让日志说谎。
+  if grep -q '^UPDATER_TOKEN=' .env 2>/dev/null; then
+    ucid="$($DC --profile updater ps -q updater 2>/dev/null | head -1)"
+    ust=""
+    [ -n "$ucid" ] && ust="$(docker inspect --format '{{.State.Status}}' "$ucid" 2>/dev/null || echo unknown)"
+    if [ "$ust" != "running" ]; then
+      log "⚠️  站点已恢复，但更新容器 updater 未就绪（状态: ${ust:-未创建}）——应用内「一键更新」会失败。"
+      log "    手工修复：cd $APP_DIR && docker compose --profile updater up -d --build updater"
+      log "===== 部署部分成功（入口已恢复，更新容器缺失） ====="
+      exit 1
+    fi
+    log "✅ updater 容器 running"
+  fi
+
   log "===== 部署成功（自愈） ====="
   exit 0
 fi
@@ -141,23 +193,23 @@ for i in $(seq 1 48); do
   sleep 5
 done
 if [ "$ok" != "1" ]; then
-  log "❌ api 容器未就绪（最后状态: $st）"
+  log "❌ api 容器未就绪（最后状态: ${st}）"
   $DC logs --tail=60 api 2>&1 | tail -60
   exit 1
 fi
 log "✅ api 容器 healthy"
 
-code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/sessions" 2>/dev/null || echo 000)"
+code="$(probe_code "$(API_PROBE_URL)")"
 case "$code" in
-  200|401) log "✅ Caddy → api 链路正常（/api/sessions → HTTP $code）" ;;
+  200|401) log "✅ Caddy → api 链路正常（/api/sessions → HTTP ${code}）" ;;
   000)
     # 已发生过的事故：web（入口/Caddy）容器整个不在（被清理或重建失败），
     # 此时整站 502 而 api 仍健康 —— 只重建入口容器即可恢复。
-    log "⚠️ 无法连接 http://127.0.0.1:$PORT，尝试重建入口容器 web…"
+    log "⚠️ 无法连接 http://127.0.0.1:${PORT}，尝试重建入口容器 web…"
     $DC up -d web 2>&1 | tail -5
     for i in $(seq 1 12); do
       sleep 5
-      code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/sessions" 2>/dev/null || echo 000)"
+      code="$(probe_code "$(API_PROBE_URL)")"
       [ "$code" != "000" ] && break
     done
     if [ "$code" = "000" ]; then
@@ -166,12 +218,26 @@ case "$code" in
       $DC ps -a 2>&1 | tail -20
       exit 1
     fi
-    log "✅ 重建入口容器后链路恢复（/api/sessions → HTTP $code）"
+    log "✅ 重建入口容器后链路恢复（/api/sessions → HTTP ${code}）"
     ;;
-  *)       log "⚠️ 反代链路异常（/api/sessions → HTTP $code），请检查 Caddy/防火墙"; exit 1 ;;
+  *)       log "⚠️ 反代链路异常（/api/sessions → HTTP ${code}），请检查 Caddy/防火墙"; exit 1 ;;
 esac
+
+# updater 就绪复查（同自愈分支的说明：站点活着 ≠ 一键更新可用）
+if grep -q '^UPDATER_TOKEN=' .env 2>/dev/null; then
+  ucid="$($DC --profile updater ps -q updater 2>/dev/null | head -1)"
+  ust=""
+  [ -n "$ucid" ] && ust="$(docker inspect --format '{{.State.Status}}' "$ucid" 2>/dev/null || echo unknown)"
+  if [ "$ust" != "running" ]; then
+    log "⚠️  站点已就绪，但更新容器 updater 未运行（状态: ${ust:-未创建}）——应用内「一键更新」不可用。"
+    log "    手工修复：cd $APP_DIR && docker compose --profile updater up -d --build updater"
+    log "===== 部署部分成功（站点可用，更新容器缺失） ====="
+    exit 1
+  fi
+  log "✅ updater 容器 running"
+fi
 
 log "===== 部署成功 ====="
 log "本机入口: http://127.0.0.1:$PORT"
-log "下一步：宝塔「网站 → 反向代理」指向 http://127.0.0.1:$PORT，并申请 SSL"
+log "下一步：宝塔「网站 → 反向代理」指向 http://127.0.0.1:${PORT}，并申请 SSL"
 exit 0

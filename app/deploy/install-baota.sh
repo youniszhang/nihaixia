@@ -69,7 +69,7 @@ else
 fi
 rc=$?
 if [ $rc -ne 0 ]; then
-  log "❌ 构建/启动失败（exit=$rc）"
+  log "❌ 构建/启动失败（exit=${rc}）"
   $DC ps 2>&1 | tail -20
   exit 1
 fi
