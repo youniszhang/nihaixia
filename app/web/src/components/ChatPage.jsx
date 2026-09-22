@@ -319,15 +319,18 @@ export default function ChatPage({ module, onBackToPortal }) {
 
   // ---- send ----
   // explicitContent：自动回传工具触发块时用（此时不带待发图片）。
+  // explicitSid：同上——自动回传发生在 send 内部递归调用，而 setActiveId 是异步提交的，
+  //   闭包里的 activeId 还是旧值（首轮为 null），会导致又新建一个会话、
+  //   把用户的问题和排盘解读劈到两个会话里。所以显式把 sid 传下去。
   // 注意 onClick 必须包一层箭头函数，否则点击事件会被当成 explicitContent 传进来。
-  async function send(explicitContent) {
+  async function send(explicitContent, explicitSid) {
     const isAuto = typeof explicitContent === 'string';
     const content = isAuto ? explicitContent : input.trim();
     const imgs = isAuto ? [] : pendingImages;
     // 用 ref 而不是 state 读「是否生成中」：自动回传是在 send 内部递归调用的，
     // state 还没提交，闭包里读到的会是上一轮的旧值（恒为 true），导致自动执行被静默跳过。
     if ((!content && !imgs.length) || streamingRef.current) return;
-    let sid = activeId;
+    let sid = explicitSid || activeId;
     if (!sid) {
       const { session } = await api.createSession(mod.name, mod.id);
       sid = session.id;
@@ -446,7 +449,7 @@ export default function ChatPage({ module, onBackToPortal }) {
       if (st.count < 3 && trig.full !== st.last) {
         st.count += 1;
         st.last = trig.full;
-        await send(trig.full); // 递归：走完整的一次生成
+        await send(trig.full, sid); // 递归：走完整的一次生成（带上本轮 sid，避免新建会话）
       } else if (st.count >= 3) {
         setErrNote('本轮脚本调用已达上限（3 次）。如需继续排盘，请再发一条消息。');
       }
