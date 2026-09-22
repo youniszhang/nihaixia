@@ -74,7 +74,15 @@ const RE_SAFE_TEXT = /^[\p{L}\p{N}\s，。？！、：；""''（）()\-_,.?!:;]{
 const RE_SPREAD = /^(single|three|diamond|moon|horseshoe|celtic)$/;
 
 // ---------- 八字排盘（bazi_pai_pan.py，零依赖） ----------
-export async function baziPaiPan({ solar, lunar, leap, hour, shichen, sex, place } = {}) {
+export async function baziPaiPan(input = {}) {
+  // 参数别名容错：模型可能发性别/性别字段的英文变体，只认一种会白白报「性别必填」
+  const solar = input.solar ?? input.solar_date ?? input.date;
+  const lunar = input.lunar ?? input.lunar_date;
+  const leap = input.leap ?? input.isLeapMonth ?? input.leap_month;
+  const hour = input.hour ?? input.time;
+  const shichen = input.shichen;
+  const sex = input.sex ?? input.gender;
+  const place = input.place ?? input.birthplace ?? input.city;
   const args = [path.join(SCRIPTS_DIR, 'bazi_pai_pan.py')];
   if (solar) { if (!RE_DATE.test(solar)) throw new Error('阳历日期格式应为 YYYY-MM-DD'); args.push('--solar', solar); }
   if (lunar) { if (!RE_DATE.test(lunar)) throw new Error('农历日期格式应为 YYYY-MM-DD（数字）'); args.push('--lunar', lunar); }
@@ -88,7 +96,12 @@ export async function baziPaiPan({ solar, lunar, leap, hour, shichen, sex, place
 }
 
 // ---------- 塔罗抽牌（tarot_draw.py，零依赖） ----------
-export async function tarotDraw({ spread = 'three', question = '', seed, timeFactor } = {}) {
+// 同样兼容 time_factor / timeFactor 两种写法
+export async function tarotDraw(input = {}) {
+  const spread = input.spread ?? 'three';
+  const question = input.question ?? input.q ?? '';
+  const seed = input.seed;
+  const timeFactor = input.timeFactor ?? input.time_factor;
   if (!RE_SPREAD.test(spread)) throw new Error('未知牌阵');
   const q = String(question || '').trim();
   if (q && !RE_SAFE_TEXT.test(q)) throw new Error('问题含不支持的字符');
@@ -104,25 +117,36 @@ export async function tarotDraw({ spread = 'three', question = '', seed, timeFac
 }
 
 // ---------- 奇门排盘（qimen_cli.py，需 lunar_python） ----------
-export async function qimenPaiPan({ calendarType = 'solar', timeInput, city = '', country = '中国', questionType = '', questionGoal = '' } = {}) {
+// 入参命名做「两种写法都收」：内部约定 camelCase，而 qimen_cli.py 的入参格式是
+// snake_case（提示词里给模型的示例也是它）。模型两种都可能发；只认一种的话，
+// 另一路会静默退化成默认值 —— 生产上表现为「缺少起局时间」而脚本白白失败。
+export async function qimenPaiPan(input = {}) {
+  const calendarType = input.calendarType ?? input.calendar_type ?? 'solar';
+  const rawTime = input.timeInput ?? input.time_input;
+  const city = input.city ?? input.location?.city ?? '';
+  const country = input.country ?? input.location?.country ?? '中国';
+  const questionType = input.questionType ?? input.question_type ?? '';
+  const questionGoal = input.questionGoal ?? input.question_goal ?? '';
+
   if (!/^(solar|lunar|now)$/.test(calendarType)) throw new Error('calendar_type 仅支持 solar/lunar/now');
   if (!RE_SAFE_TEXT.test(city) || !RE_SAFE_TEXT.test(questionType) || !RE_SAFE_TEXT.test(questionGoal)) {
     throw new Error('输入含不支持的字符');
   }
   let ti = null;
   if (calendarType !== 'now') {
-    if (timeInput && typeof timeInput === 'object') {
-      const y = Number(timeInput.year), m = Number(timeInput.month), d = Number(timeInput.day);
-      const hh = Number(timeInput.hour) || 0, mm = Number(timeInput.minute) || 0;
+    if (rawTime && typeof rawTime === 'object') {
+      const y = Number(rawTime.year), m = Number(rawTime.month), d = Number(rawTime.day);
+      const hh = Number(rawTime.hour) || 0, mm = Number(rawTime.minute) || 0;
       if (!Number.isInteger(y) || y < 1901 || y > 2100) throw new Error('年份应在 1901-2100');
       if (!Number.isInteger(m) || m < 1 || m > 12) throw new Error('月份无效');
       if (!Number.isInteger(d) || d < 1 || d > 31) throw new Error('日期无效');
-      ti = { year: y, month: m, day: d, hour: hh, minute: mm, second: 0, is_leap_month: Boolean(timeInput.isLeapMonth) };
-    } else if (typeof timeInput === 'string' && RE_DATE.test(timeInput)) {
-      const [y, m, d] = timeInput.split('-').map(Number);
+      const leap = rawTime.isLeapMonth ?? rawTime.is_leap_month ?? input.isLeapMonth ?? input.is_leap_month;
+      ti = { year: y, month: m, day: d, hour: hh, minute: mm, second: 0, is_leap_month: Boolean(leap) };
+    } else if (typeof rawTime === 'string' && RE_DATE.test(rawTime)) {
+      const [y, m, d] = rawTime.split('-').map(Number);
       ti = { year: y, month: m, day: d, hour: 12, minute: 0, second: 0, is_leap_month: false };
     } else {
-      throw new Error('缺少起局时间');
+      throw new Error('缺少起局时间：calendar_type 非 now 时需提供 time_input（对象或 YYYY-MM-DD）');
     }
   }
   // qimen_cli.py 走 --input/--output JSON；输出写到临时文件再读回

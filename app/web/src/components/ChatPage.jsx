@@ -14,6 +14,27 @@ import { newImageId, putImage, getImageMap, extractImageIds } from '../lib/image
 
 const DISCLAIMER_SEEN_KEY = 'xuanshu_disclaimer_accepted_v1';
 
+// —— 工具触发块（排盘/起局/抽牌）——
+//
+// 服务端的脚本只认「用户消息里」的触发块（chat.js runModuleTool）。而触发块是**模型**产出的
+// （人设里要求它收集齐信息后输出）。两边要接上，必须有谁把模型的输出回传成用户消息——
+// 这个角色一直缺，导致脚本从未真正跑过、模型只能自己口算干支（恰恰是提示词禁止的）。
+// 这里补上：模型输出触发块 → 前端隐藏该块并自动回传一次 → 服务端跑脚本 → 模型据结果解读。
+const TOOL_TRIGGER_RE = /【(排盘|起局|抽牌)请求】\s*```json\s*[\s\S]*?```/;
+const TOOL_KIND_LABEL = { 排盘: '排盘', 起局: '起局', 抽牌: '抽牌' };
+
+function extractToolTrigger(text) {
+  const s = String(text || '');
+  const m = s.match(TOOL_TRIGGER_RE);
+  if (!m) return null;
+  return { full: m[0], kind: m[1] };
+}
+
+// 渲染时把触发块去掉：那种 JSON 是给系统看的，不该出现在对话正文里
+function stripToolTrigger(text) {
+  return String(text || '').replace(new RegExp(TOOL_TRIGGER_RE.source, 'g'), '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export default function ChatPage({ module, onBackToPortal }) {
   const { user, logout } = useAuth();
   const [sessions, setSessions] = useState([]);
@@ -64,6 +85,10 @@ export default function ChatPage({ module, onBackToPortal }) {
   const scrollHostRef = useRef(null);
   const inputRef = useRef(null);
   const inputPastedRef = useRef(false);
+  // 与 streaming state 同步的真值来源（供 send 内部递归读取，见 send 里的注释）
+  const streamingRef = useRef(false);
+  // 工具触发块的自动回传计数：只在「用户主动发送」时清零，防止模型反复输出触发块造成死循环
+  const autoRunRef = useRef({ count: 0, last: '' });
 
   // 输入框自适应高度（对齐 DeepSeek 官网手感）：
   //   - 随内容长高，超过上限（200px）后转为内部滚动；
@@ -135,7 +160,7 @@ export default function ChatPage({ module, onBackToPortal }) {
 
   // ---- session selection ----
   async function openSession(id) {
-    if (streaming) { abortRef.current?.abort(); setStreaming(false); }
+    if (streaming) { abortRef.current?.abort(); setStreaming(false); streamingRef.current = false; }
     // 已缓存则立即渲染，避免"点历史先闪一下空状态、看起来像弹回新问诊"
     const cached = messageCacheRef.current.get(id);
     setActiveId(id);
@@ -206,7 +231,7 @@ export default function ChatPage({ module, onBackToPortal }) {
   }
 
   async function newSession() {
-    if (streaming) { abortRef.current?.abort(); setStreaming(false); }
+    if (streaming) { abortRef.current?.abort(); setStreaming(false); streamingRef.current = false; }
     const { session } = await api.createSession(mod.name, mod.id);
     await refreshSessions();
     setActiveId(session.id);
@@ -293,10 +318,15 @@ export default function ChatPage({ module, onBackToPortal }) {
   }, [messages, localImages]);
 
   // ---- send ----
-  async function send() {
-    const content = input.trim();
-    const imgs = pendingImages;
-    if ((!content && !imgs.length) || streaming) return;
+  // explicitContent：自动回传工具触发块时用（此时不带待发图片）。
+  // 注意 onClick 必须包一层箭头函数，否则点击事件会被当成 explicitContent 传进来。
+  async function send(explicitContent) {
+    const isAuto = typeof explicitContent === 'string';
+    const content = isAuto ? explicitContent : input.trim();
+    const imgs = isAuto ? [] : pendingImages;
+    // 用 ref 而不是 state 读「是否生成中」：自动回传是在 send 内部递归调用的，
+    // state 还没提交，闭包里读到的会是上一轮的旧值（恒为 true），导致自动执行被静默跳过。
+    if ((!content && !imgs.length) || streamingRef.current) return;
     let sid = activeId;
     if (!sid) {
       const { session } = await api.createSession(mod.name, mod.id);
@@ -323,6 +353,7 @@ export default function ChatPage({ module, onBackToPortal }) {
     setPendingImages([]);
     setInput('');
     setStreaming(true);
+    streamingRef.current = true;
     setErrNote('');
 
     const asstMsg = { id: `tmp-${Date.now()}-a`, role: 'assistant', content: '' };
@@ -388,6 +419,7 @@ export default function ChatPage({ module, onBackToPortal }) {
     // 收尾：不论成功/失败/中断都要走这里（原来挂在 try/finally 上，
     // 改成重试循环后显式收尾，避免重试路径漏掉状态复位）
     setStreaming(false);
+    streamingRef.current = false; // 必须早于下面的自动回传，否则递归 send 会被守卫挡住
     abortRef.current = null;
     refreshSessions();
     refreshQuota();
@@ -403,11 +435,28 @@ export default function ChatPage({ module, onBackToPortal }) {
         messages: list, hasMore: Boolean(d.has_more), pin: d.session.pin || '', title: d.session.title,
       });
     }).catch(() => {});
+
+    // —— 工具触发块自动回传（排盘/起局/抽牌）——
+    // 模型按人设要求输出触发块 → 前端把它作为下一条用户消息自动发出去，
+    // 服务端据此跑脚本并把结果注入上下文，模型再基于结果解读（用户不必手动复制那段 JSON）。
+    if (!isAuto) autoRunRef.current = { count: 0, last: '' }; // 用户新提问 → 重置自动执行额度
+    const trig = extractToolTrigger(acc);
+    if (trig) {
+      const st = autoRunRef.current;
+      if (st.count < 3 && trig.full !== st.last) {
+        st.count += 1;
+        st.last = trig.full;
+        await send(trig.full); // 递归：走完整的一次生成
+      } else if (st.count >= 3) {
+        setErrNote('本轮脚本调用已达上限（3 次）。如需继续排盘，请再发一条消息。');
+      }
+    }
   }
 
   function stop() {
     abortRef.current?.abort();
     setStreaming(false);
+    streamingRef.current = false;
   }
 
   const activeSession = sessions.find((s) => s.id === activeId);
@@ -519,7 +568,9 @@ export default function ChatPage({ module, onBackToPortal }) {
                       {m.role === 'user' ? '你' : mod.name.slice(0, 1)}
                     </div>
                     <div className="msg-body">
-                      {m.role === 'assistant' ? <MarkdownMessage content={m.content} /> : <UserMessage content={m.content} localImages={localImages} />}
+                      {m.role === 'assistant'
+                        ? <MarkdownMessage content={stripToolTrigger(m.content)} />
+                        : <UserMessage content={m.content} localImages={localImages} />}
                       {m.role === 'assistant' && m.content && (
                         <p className="msg-tag">
                           <Icon name="alert" size={13} /> {mod.disclaimer}
@@ -633,7 +684,7 @@ export default function ChatPage({ module, onBackToPortal }) {
               ) : (
                 <button
                   className="send-btn"
-                  onClick={send}
+                  onClick={() => send()}
                   disabled={(!input.trim() && !pendingImages.length) || imgBusy}
                   title="发送"
                   aria-label="发送"
@@ -711,6 +762,19 @@ export default function ChatPage({ module, onBackToPortal }) {
 // 关键：服务端不存图，图片来自本机 IndexedDB。取不到时**不能静默变成空白**——
 // 要明确告诉用户「图片只存本机，当前设备上看不到」，否则用户会以为是系统把图删了。
 function UserMessage({ content, localImages }) {
+  // 自动回传的工具触发块：渲染成一行执行提示，不把 JSON 摊给用户看
+  const trig = extractToolTrigger(content);
+  if (trig && !stripToolTrigger(content)) {
+    return (
+      <span className="msg-tool-chip" title="系统已把这次请求交给计算脚本执行">
+        <Icon name="zap" size={13} /> 已自动执行{TOOL_KIND_LABEL[trig.kind] || trig.kind}脚本
+      </span>
+    );
+  }
+  if (trig) {
+    // 触发块混在文字里（少见）：只展示文字部分
+    return <div className="msg-plain">{stripToolTrigger(content)}</div>;
+  }
   const ids = extractImageIds(content);
   // 去掉标记后的纯文字（标记由图片区单独呈现，避免重复展示原始 id）
   const text = content.replace(/\[图片:[A-Za-z0-9_-]{1,40}\]/g, '').trim();

@@ -1142,6 +1142,19 @@ body {
   border-radius: var(--radius-sm);
 }
 
+/* 自动回传的工具触发块：一行执行提示，不展示原始 JSON */
+.msg-tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  font-size: 0.78rem;
+  color: var(--amber);
+  background: rgba(184, 134, 11, 0.08);
+  border: 1px solid rgba(184, 134, 11, 0.22);
+  border-radius: 999px;
+}
+
 .send-btn,
 .stop-btn {
   width: 36px;
