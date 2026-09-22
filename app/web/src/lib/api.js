@@ -133,12 +133,13 @@ export const api = {
   deleteSession: (id) => request(`/api/sessions/${id}`, { method: 'DELETE' }),
 
   // chat streaming: returns an async generator of SSE events
-  streamChat: async function* (sessionId, content, signal, pin = '') {
+  // images: 仅当轮投喂（服务端不落盘），形如 [{ id, uri }]
+  streamChat: async function* (sessionId, content, signal, pin = '', images = []) {
     const res = await fetch('/api/chat/send', {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sessionId, content, pin }),
+      body: JSON.stringify({ session_id: sessionId, content, pin, images }),
       signal,
     });
     if (!res.ok) throw new ApiError(await parseError(res), res.status);

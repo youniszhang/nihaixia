@@ -9,6 +9,8 @@ import AdminConsole from './AdminConsole.jsx';
 import DisclaimerModal from './DisclaimerModal.jsx';
 import MembershipPanel from './MembershipPanel.jsx';
 import Icon from './Icon.jsx';
+import { compressImage, IMAGE_LIMITS } from '../lib/imageCompress.js';
+import { newImageId, putImage, getImageMap, extractImageIds } from '../lib/imageStore.js';
 
 const DISCLAIMER_SEEN_KEY = 'xuanshu_disclaimer_accepted_v1';
 
@@ -32,6 +34,15 @@ export default function ChatPage({ module, onBackToPortal }) {
   const [errNote, setErrNote] = useState(''); // 最近一次生成失败的原因（常驻到下次发送）
   const [quota, setQuota] = useState(null);   // 剩余额度 / 今日用量
   const [checkedInToday, setCheckedInToday] = useState(false);
+  // 待发送的图片：[{ id, uri, preview, size, width, height }]
+  //   uri    = 给服务端的 data URI（仅当轮投喂，服务端不留存）
+  //   preview= 本机预览用的 objectURL
+  const [pendingImages, setPendingImages] = useState([]);
+  const [imgBusy, setImgBusy] = useState(false);
+  const [imgErr, setImgErr] = useState('');
+  // 已发消息里的图片：{ [imgId]: objectURL }，从 IndexedDB 取；取不到就只渲染标识
+  const [localImages, setLocalImages] = useState({});
+  const fileRef = useRef(null);
   // 历史加载：默认只取最近一页；向上滚动再按需加载更早的（长会话全量渲染会明显卡顿）
   const PAGE_SIZE = 40;
   const RENDER_WINDOW = 60; // 同时渲染的消息上限（更早的折叠为「显示更早」）
@@ -226,10 +237,66 @@ export default function ChatPage({ module, onBackToPortal }) {
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
+  // ---- 图片：选择 / 粘贴 / 压缩 ----
+  // 服务端不存图，这里是唯一副本（存 IndexedDB），UI 必须让用户知道这点。
+  const addFiles = useCallback(async (files) => {
+    const list = Array.from(files || []).filter((f) => /^image\//.test(f.type || ''));
+    if (!list.length) return;
+    setImgErr('');
+    setImgBusy(true);
+    try {
+      const room = IMAGE_LIMITS.MAX_COUNT - pendingImages.length;
+      if (room <= 0) { setImgErr(`单轮最多 ${IMAGE_LIMITS.MAX_COUNT} 张图片`); return; }
+      const picked = list.slice(0, room);
+      if (list.length > room) setImgErr(`单轮最多 ${IMAGE_LIMITS.MAX_COUNT} 张，已取前 ${room} 张`);
+      const added = [];
+      for (const f of picked) {
+        try {
+          const { blob, uri, mime, width, height } = await compressImage(f);
+          const id = newImageId();
+          // 先存本地（失败也不阻断本轮发送：图仍能投喂，只是回看时只剩标识）
+          await putImage({ id, blob, uri, mime, width, height });
+          added.push({ id, uri, preview: URL.createObjectURL(blob), size: blob.size, width, height });
+        } catch (e) {
+          setImgErr(e.message || '图片处理失败');
+        }
+      }
+      if (added.length) setPendingImages((p) => [...p, ...added]);
+    } finally {
+      setImgBusy(false);
+    }
+  }, [pendingImages.length]);
+
+  function removePendingImage(id) {
+    setPendingImages((p) => {
+      const t = p.find((x) => x.id === id);
+      if (t?.preview) URL.revokeObjectURL(t.preview);
+      return p.filter((x) => x.id !== id);
+    });
+  }
+
+  // 消息里出现图片标记时，从本地 IndexedDB 取图（取不到就只剩标识，说明是换设备/清缓存了）
+  useEffect(() => {
+    const ids = new Set();
+    for (const m of messages) {
+      for (const id of extractImageIds(m.content)) {
+        if (!localImages[id]) ids.add(id);
+      }
+    }
+    if (!ids.size) return;
+    let cancelled = false;
+    getImageMap([...ids]).then((map) => {
+      if (cancelled || !Object.keys(map).length) return;
+      setLocalImages((prev) => ({ ...prev, ...map }));
+    });
+    return () => { cancelled = true; };
+  }, [messages, localImages]);
+
   // ---- send ----
   async function send() {
     const content = input.trim();
-    if (!content || streaming) return;
+    const imgs = pendingImages;
+    if ((!content && !imgs.length) || streaming) return;
     let sid = activeId;
     if (!sid) {
       const { session } = await api.createSession(mod.name, mod.id);
@@ -238,8 +305,22 @@ export default function ChatPage({ module, onBackToPortal }) {
     }
 
     // Optimistic local message
-    const userMsg = { id: `tmp-${Date.now()}`, role: 'user', content };
+    // 乐观气泡带上图片标记，这样 UserMessage 能立刻用本机 preview 渲染出原图；
+    // 生成结束回填服务端消息后，标记内容一致，图片无缝接续。
+    const marker = imgs.map((i) => `[图片:${i.id}]`).join('');
+    const userMsg = {
+      id: `tmp-${Date.now()}`,
+      role: 'user',
+      content: marker ? (content ? `${content}\n${marker}` : marker) : content,
+    };
     setMessages((m) => [...m, userMsg]);
+    // 把 preview 登记进 localImages，供 UserMessage 按 id 取用（不 revoke，正在显示）
+    setLocalImages((prev) => {
+      const next = { ...prev };
+      for (const i of imgs) next[i.id] = i.preview;
+      return next;
+    });
+    setPendingImages([]);
     setInput('');
     setStreaming(true);
     setErrNote('');
@@ -251,7 +332,7 @@ export default function ChatPage({ module, onBackToPortal }) {
     abortRef.current = controller;
     let acc = '';
     try {
-      for await (const ev of api.streamChat(sid, content, controller.signal, intakeNote)) {
+      for await (const ev of api.streamChat(sid, content, controller.signal, intakeNote, imgs.map((i) => ({ id: i.id, uri: i.uri })))) {
         if (ev.type === 'delta') {
           acc += ev.text;
           setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc } : x)));
@@ -412,7 +493,7 @@ export default function ChatPage({ module, onBackToPortal }) {
                       {m.role === 'user' ? '你' : mod.name.slice(0, 1)}
                     </div>
                     <div className="msg-body">
-                      {m.role === 'assistant' ? <MarkdownMessage content={m.content} /> : <div className="msg-plain">{m.content}</div>}
+                      {m.role === 'assistant' ? <MarkdownMessage content={m.content} /> : <UserMessage content={m.content} localImages={localImages} />}
                       {m.role === 'assistant' && m.content && (
                         <p className="msg-tag">
                           <Icon name="alert" size={13} /> {mod.disclaimer}
@@ -442,9 +523,51 @@ export default function ChatPage({ module, onBackToPortal }) {
             </div>
           )}
           <div className="composer">
+            {pendingImages.length > 0 && (
+              <div className="composer-imgs">
+                {pendingImages.map((im) => (
+                  <div key={im.id} className="composer-img">
+                    <img src={im.preview} alt="待发送图片" />
+                    <button
+                      type="button"
+                      className="composer-img-remove"
+                      onClick={() => removePendingImage(im.id)}
+                      title="移除这张图片"
+                      aria-label="移除图片"
+                    >
+                      <Icon name="close" size={12} />
+                    </button>
+                  </div>
+                ))}
+                {imgBusy && <span className="composer-img-loading">处理中…</span>}
+              </div>
+            )}
+            {(imgErr || pendingImages.length > 0) && (
+              <p className={imgErr ? 'composer-img-note err' : 'composer-img-note'}>
+                <Icon name="info" size={12} />{' '}
+                {imgErr || '图片只在本机浏览器保存，服务器不存储：换设备或清除浏览器数据后，历史记录里将看不到这张图。'}
+              </p>
+            )}
             <textarea
               ref={inputRef}
-              onPaste={() => { inputPastedRef.current = true; requestAnimationFrame(resizeInput); }}
+              onPaste={(e) => {
+                // 粘贴图片（截图、复制的图）直接进待发队列；纯文本仍走原来的高度重算
+                const items = e.clipboardData?.items || [];
+                const files = [];
+                for (const it of items) {
+                  if (it.kind === 'file' && /^image\//.test(it.type || '')) {
+                    const f = it.getAsFile();
+                    if (f) files.push(f);
+                  }
+                }
+                if (files.length) {
+                  e.preventDefault();
+                  addFiles(files);
+                  return;
+                }
+                inputPastedRef.current = true;
+                requestAnimationFrame(resizeInput);
+              }}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -455,6 +578,22 @@ export default function ChatPage({ module, onBackToPortal }) {
             />
             <div className="composer-actions">
               <div className="composer-notes">
+                <button
+                  className="text-btn"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={imgBusy || pendingImages.length >= IMAGE_LIMITS.MAX_COUNT}
+                  title={`添加图片（最多 ${IMAGE_LIMITS.MAX_COUNT} 张）`}
+                >
+                  <Icon name="image" size={14} /> 图片
+                </button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/gif,image/webp"
+                  multiple
+                  hidden
+                  onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }}
+                />
                 {isTcm && (
                   <button className="text-btn" onClick={() => setShowIntake(true)}>
                     <Icon name="clipboard" size={14} /> 十问 / 舌象
@@ -466,7 +605,13 @@ export default function ChatPage({ module, onBackToPortal }) {
                   <Icon name="stop" size={16} />
                 </button>
               ) : (
-                <button className="send-btn" onClick={send} disabled={!input.trim()} title="发送" aria-label="发送">
+                <button
+                  className="send-btn"
+                  onClick={send}
+                  disabled={(!input.trim() && !pendingImages.length) || imgBusy}
+                  title="发送"
+                  aria-label="发送"
+                >
                   <Icon name="send" size={17} />
                 </button>
               )}
@@ -531,6 +676,31 @@ export default function ChatPage({ module, onBackToPortal }) {
       {showDisclaimer && (
         <DisclaimerModal onAccept={acceptDisclaimer} />
       )}
+    </div>
+  );
+}
+
+// 用户消息渲染：把「[图片:xxx]」标记换成真实图片。
+//
+// 关键：服务端不存图，图片来自本机 IndexedDB。取不到时**不能静默变成空白**——
+// 要明确告诉用户「图片只存本机，当前设备上看不到」，否则用户会以为是系统把图删了。
+function UserMessage({ content, localImages }) {
+  const ids = extractImageIds(content);
+  // 去掉标记后的纯文字（标记由图片区单独呈现，避免重复展示原始 id）
+  const text = content.replace(/\[图片:[A-Za-z0-9_-]{1,40}\]/g, '').trim();
+  if (!ids.length) return <div className="msg-plain">{content}</div>;
+  return (
+    <div className="msg-plain">
+      <div className="msg-imgs">
+        {ids.map((id) => (localImages[id]
+          ? <img key={id} src={localImages[id]} alt="上传的图片" className="msg-img" />
+          : (
+            <span key={id} className="msg-img-missing" title="图片只保存在本机浏览器；换设备或清除浏览器数据后无法查看">
+              <Icon name="alert" size={13} /> 图片未在本机保存
+            </span>
+          )))}
+      </div>
+      {text && <span className="msg-imgs-text">{text}</span>}
     </div>
   );
 }

@@ -42,6 +42,7 @@ const ICONS = {
   message: <><path d="M20 12a7.5 7.5 0 0 1-10.9 6.7L4 20l1.3-4.1A7.5 7.5 0 1 1 20 12z" /></>,
   'message-plus': <><path d="M20 11.5A7.5 7.5 0 0 1 9.1 18L4 20l1.3-4.1A7.5 7.5 0 1 1 20 11.5z" /><path d="M12 8.5v6" /><path d="M9 11.5h6" /></>,
   clipboard: <><rect x="6" y="4" width="12" height="17" rx="2" /><path d="M9.5 4V3h5v1" /><path d="M9.5 10h5" /><path d="M9.5 14h5" /></>,
+  image: <><rect x="3" y="4.5" width="18" height="15" rx="2.5" /><circle cx="8.5" cy="10" r="1.8" /><path d="M4 17l4.5-4.2a2 2 0 0 1 2.7 0L16 17" /><path d="M14.5 14.2l1.6-1.5a2 2 0 0 1 2.7 0L21 15" /></>,
   stethoscope: <><path d="M6 3v5a4 4 0 0 0 8 0V3" /><path d="M10 12v3a4 4 0 0 0 8 0v-2" /><circle cx="18" cy="11" r="2" /></>,
   send: <><path d="M4 12l16-8-6 16-2.6-6.4z" /><path d="M11.4 13.6L20 4" /></>,
   stop: <rect x="6" y="6" width="12" height="12" rx="2" />,

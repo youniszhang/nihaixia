@@ -29,6 +29,39 @@ function profileBlock(p) {
   return '\n\n【用户体质档案（问诊参考）】\n' + lines.join('\n');
 }
 
+// —— 图片上传（仅当轮投喂，服务端不留存）——
+//
+// 设计约定（用户明确要求）：
+//   · 服务端不落盘、不入库：图片只在本轮请求的内存里走一遍，拼进上游 messages 后即丢弃；
+//   · 会话里只留一个「[图片:<id>]」标记（纯文本，随用户消息一起入库）；
+//   · 原图由前端存本机 IndexedDB，刷新/回看时本地取；换设备或清了缓存就只剩标记。
+// 数据形态：data URI（data:image/jpeg;base64,...）——与 DeepSeek vision 的 image_url 完全一致。
+const IMG_DATA_URI_RE = /^data:image\/(jpeg|png|gif|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+const IMG_MAX_BYTES = 2 * 1024 * 1024;   // 单张图上限（base64 后）；前端压到长边 1300px，实测约 0.3-0.7MB
+const IMG_MAX_COUNT = 3;                 // 单轮最多几张
+// 本路由的请求体上限：3 张 × 2MB + 文字余量。注意 Fastify 在 preHandler **之前**解析 body，
+// 所以这个值对未登录请求同样生效 —— 不能为了宽松随手调到几十 MB（那是免鉴权的 DoS 面）。
+const SEND_BODY_LIMIT = 8 * 1024 * 1024;
+
+// 解析并校验前端提交的图片数组；非法一律丢弃而不是报错（图片是增强，不该阻断文字问诊）
+// id 由前端生成，是浏览器 IndexedDB 里的键；服务端只把它写进文本标记，不解释。
+function parseImages(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const it of raw.slice(0, IMG_MAX_COUNT)) {
+    if (!it || typeof it !== 'object') continue;
+    const uri = typeof it.uri === 'string' ? it.uri : '';
+    if (!uri || uri.length > IMG_MAX_BYTES) continue;
+    if (!IMG_DATA_URI_RE.test(uri)) continue;
+    const m = uri.match(/^data:image\/(jpeg|png|gif|webp);base64,/);
+    // id 只允许安全字符，避免写进消息文本时破坏标记解析（前端用 crypto.randomUUID）
+    const id = String(it.id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
+    if (!id) continue;
+    out.push({ id, uri, mime: `image/${m[1]}` });
+  }
+  return out;
+}
+
 // 模块会话的固定背景块：中医沿用「问诊单」语义，其余模块统称「咨询背景」
 function pinLabel(moduleId) {
   return moduleId === 'tcm' ? '问诊' : '咨询';
@@ -84,11 +117,13 @@ export default async function chatRoutes(fastify) {
   // Per-user rate limit on chat starts
   const rateOpts = { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } };
 
-  fastify.post('/send', { preHandler: [fastify.authenticate], ...rateOpts }, async (req, reply) => {
+  fastify.post('/send', { preHandler: [fastify.authenticate], ...rateOpts, bodyLimit: SEND_BODY_LIMIT }, async (req, reply) => {
     const sessionId = req.body?.session_id;
     const content = clamp((req.body?.content || '').trim(), 4000);
     const pin = clamp((req.body?.pin || '').trim(), 2000);
-    if (!sessionId || !content) return sendError(reply, 'bad_request', '缺少 session_id 或消息内容');
+    // 图片：只在本轮内存里传递，服务端不落盘（详见 parseImages 上方注释）
+    const images = parseImages(req.body?.images);
+    if (!sessionId || (!content && !images.length)) return sendError(reply, 'bad_request', '缺少 session_id 或消息内容');
 
     const session = getSession(sessionId);
     if (!session || session.user_id !== req.user.id) return sendError(reply, 'not_found', '问诊会话不存在', 404);
@@ -130,12 +165,16 @@ export default async function chatRoutes(fastify) {
       updateSessionPin(sessionId, pin);
     }
 
+    // 入库的用户消息：文字 + 图片占位标记（服务端不存图，原图在前端 IndexedDB）
+    // 标记形如 [图片:img_ab12cd]；前端回放时按 id 从本地取图，取不到就渲染成普通标识。
+    const marker = images.map((im) => `[图片:${im.id}]`).join('');
+    const persistedContent = marker ? (content ? `${content}\n${marker}` : marker) : content;
     // Keep a transient user message; it is persisted only when generation starts
-    const userMsgId = addMessage(sessionId, 'user', content);
+    const userMsgId = addMessage(sessionId, 'user', persistedContent);
 
     // Auto-title from first user question
     if (countMessages(sessionId) <= 1) {
-      const title = content.replace(/\s+/g, ' ').slice(0, 16);
+      const title = (content || '图片问诊').replace(/\s+/g, ' ').slice(0, 16);
       renameSession(sessionId, title || mod.name);
     }
 
@@ -219,15 +258,30 @@ export default async function chatRoutes(fastify) {
     const isOfficialDeepSeek = /^https?:\/\/([^/]*\.)?api\.deepseek\.com(\/|$)/i.test(baseUrlForMode);
     const useSystemRole = modeSetting === 'system' || (modeSetting === 'auto' && isOfficialDeepSeek);
 
+    // —— 图片：只在 api 通道投喂；dsweb 是网页版文本通道，带不了图 ——
+    const imageBlocks = images.map((im) => ({ type: 'image_url', image_url: { url: im.uri } }));
+    if (images.length && provider === 'dsweb') {
+      // 不静默丢图：明确告诉用户这条通道不支持，避免"我传了但它装作没看见"
+      sse(reply, { type: 'notice', text: '当前为网页版 DeepSeek 通道，暂不支持图片；本次仅按文字理解。' });
+    }
+    const sendImages = provider === 'api' ? imageBlocks : [];
+    // 用量记账：图片不经文字通道，base64 长度会把报表撑爆，按官方口径折算——
+    // 单张图缩放后最多 1024 tokens，中文约 1 字 1 token，故记 1024 字符当量/张。
+    const imgChars = sendImages.length * 1024;
+
     const messages = useSystemRole
       ? [
           { role: 'system', content: sysContent },
           ...history,
-          { role: 'user', content },
+          sendImages.length
+            ? { role: 'user', content: [{ type: 'text', text: content || '（请看图片）' }, ...sendImages] }
+            : { role: 'user', content },
         ]
       : [
           ...history,
-          { role: 'user', content: sysContent + '\n\n【用户发言】\n' + content },
+          sendImages.length
+            ? { role: 'user', content: [{ type: 'text', text: sysContent + '\n\n【用户发言】\n' + (content || '（请看图片）') }, ...sendImages] }
+            : { role: 'user', content: sysContent + '\n\n【用户发言】\n' + content },
         ];
 
     let full = '';
@@ -330,7 +384,7 @@ export default async function chatRoutes(fastify) {
             sessionId,
             provider,
             model: provider === 'dsweb' ? 'deepseek-web' : (getSetting('llm_model') || config.llm.model),
-            promptChars: sysContent.length + content.length,
+            promptChars: sysContent.length + content.length + imgChars,
             completionChars: full.length,
           });
         } catch { /* 统计失败不影响对话 */ }
@@ -375,7 +429,7 @@ export default async function chatRoutes(fastify) {
             sessionId,
             provider,
             model: provider === 'dsweb' ? 'deepseek-web' : (getSetting('llm_model') || config.llm.model),
-            promptChars: sysContent.length + content.length,
+            promptChars: sysContent.length + content.length + imgChars,
             completionChars: full.length,
           });
         } catch { /* ignore */ }
