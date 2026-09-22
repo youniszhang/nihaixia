@@ -331,52 +331,78 @@ export default function ChatPage({ module, onBackToPortal }) {
     const controller = new AbortController();
     abortRef.current = controller;
     let acc = '';
-    try {
-      for await (const ev of api.streamChat(sid, content, controller.signal, intakeNote, imgs.map((i) => ({ id: i.id, uri: i.uri })))) {
-        if (ev.type === 'delta') {
-          acc += ev.text;
-          setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc } : x)));
-        } else if (ev.type === 'done') {
-          setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, id: ev.message_id, content: acc } : x)));
-          // 服务端在 done 事件里带回最新额度，免去再发一次请求
-          if (ev.quota) setQuota(ev.quota);
-          break;
-        } else if (ev.type === 'queue') {
-          // 容量保护排队：显示实时排位与预计等待（不扣额度，等到了就自动开始生成）
-          setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc || `⏳ 当前使用人数较多，排队中 第 ${ev.position} 位 · 预计约 ${ev.est_wait_s} 秒` } : x)));
-        } else if (ev.type === 'tool') {
-          // 脚本运行提示（排盘/抽牌）：显示在占位气泡里
-          setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc || `> ⚙️ ${ev.label}运行中…` } : x)));
-        } else if (ev.type === 'notice') {
-          // 中间提示（如自动重启浏览器重试）：临时显示在占位气泡里
-          setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc || `> 提示：${ev.text}` } : x)));
-        } else if (ev.type === 'error') {
-          // 失败原因单独保存：finally 里会用服务端持久化的消息覆盖气泡，
-          // 只写进气泡的话错误会在刷新后消失，用户完全看不到发生了什么
-          setErrNote(ev.message);
-          break;
+    let finalErr = '';
+    // 传输层失败（TypeError: Failed to fetch）→ 自动重试一次。
+    // 为什么值得重试：服务端重建容器（每次部署都会）或网络瞬断时，连接会被切断，
+    // 此时请求根本没进到处理逻辑（服务端没有落库），重试是干净且安全的。
+    // 只在本轮「一个字都还没流出来」时重试，避免与已生成的半截回复重叠。
+    const MAX_ATTEMPTS = 2;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      let streamed = false;
+      finalErr = '';
+      try {
+        for await (const ev of api.streamChat(sid, content, controller.signal, intakeNote, imgs.map((i) => ({ id: i.id, uri: i.uri })))) {
+          if (ev.type === 'delta') {
+            streamed = true;
+            acc += ev.text;
+            setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc } : x)));
+          } else if (ev.type === 'done') {
+            setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, id: ev.message_id, content: acc } : x)));
+            // 服务端在 done 事件里带回最新额度，免去再发一次请求
+            if (ev.quota) setQuota(ev.quota);
+            break;
+          } else if (ev.type === 'queue') {
+            // 容量保护排队：显示实时排位与预计等待（不扣额度，等到了就自动开始生成）
+            setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc || `⏳ 当前使用人数较多，排队中 第 ${ev.position} 位 · 预计约 ${ev.est_wait_s} 秒` } : x)));
+          } else if (ev.type === 'tool') {
+            // 脚本运行提示（排盘/抽牌）：显示在占位气泡里
+            setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc || `> ⚙️ ${ev.label}运行中…` } : x)));
+          } else if (ev.type === 'notice') {
+            // 中间提示（如自动重启浏览器重试）：临时显示在占位气泡里
+            setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: acc || `> 提示：${ev.text}` } : x)));
+          } else if (ev.type === 'error') {
+            // 失败原因单独保存：finally 里会用服务端持久化的消息覆盖气泡，
+            // 只写进气泡的话错误会在刷新后消失，用户完全看不到发生了什么
+            finalErr = ev.message || '生成失败';
+            break;
+          }
         }
+      } catch (e) {
+        if (e.name === 'AbortError') break; // 用户主动停止，不重试
+        // fetch 的网络级失败：TypeError（Chrome 文案 "Failed to fetch"）。
+        // 其他错误（HTTP 状态类）已在 api 层转成 ApiError，不该重试。
+        const isNetwork = e instanceof TypeError;
+        finalErr = isNetwork
+          ? '网络连接中断：可能是网络波动，或服务正在重启（每次部署会短暂重建）。你的提问没有丢失，可直接重试。'
+          : (e.message || String(e));
+        if (isNetwork && !streamed && attempt < MAX_ATTEMPTS) {
+          setMessages((m) => m.map((x) => (x.id === asstMsg.id ? { ...x, content: '> 连接中断，正在重试…' } : x)));
+          await new Promise((r) => setTimeout(r, 1200));
+          continue;
+        }
+        break;
       }
-    } catch (e) {
-      if (e.name !== 'AbortError') setErrNote(e.message || String(e));
-    } finally {
-      setStreaming(false);
-      abortRef.current = null;
-      refreshSessions();
-      refreshQuota();
-      // Refresh active session's persisted messages to reconcile ids
-      // 只回填最近一页（刚发完的消息一定在这页里），避免长会话重新拉全量
-      api.getSession(sid, { limit: PAGE_SIZE }).then((d) => {
-        const list = d.messages || [];
-        setMessages(list);
-        setHasMore(Boolean(d.has_more));
-        oldestIdRef.current = list[0]?.id ?? null;
-        setSessionTitle(d.session.title);
-        messageCacheRef.current.set(sid, {
-          messages: list, hasMore: Boolean(d.has_more), pin: d.session.pin || '', title: d.session.title,
-        });
-      }).catch(() => {});
+      break; // 正常走完（done / error / 用户停止）就不重试
     }
+    if (finalErr) setErrNote(finalErr);
+    // 收尾：不论成功/失败/中断都要走这里（原来挂在 try/finally 上，
+    // 改成重试循环后显式收尾，避免重试路径漏掉状态复位）
+    setStreaming(false);
+    abortRef.current = null;
+    refreshSessions();
+    refreshQuota();
+    // Refresh active session's persisted messages to reconcile ids
+    // 只回填最近一页（刚发完的消息一定在这页里），避免长会话重新拉全量
+    api.getSession(sid, { limit: PAGE_SIZE }).then((d) => {
+      const list = d.messages || [];
+      setMessages(list);
+      setHasMore(Boolean(d.has_more));
+      oldestIdRef.current = list[0]?.id ?? null;
+      setSessionTitle(d.session.title);
+      messageCacheRef.current.set(sid, {
+        messages: list, hasMore: Boolean(d.has_more), pin: d.session.pin || '', title: d.session.title,
+      });
+    }).catch(() => {});
   }
 
   function stop() {
