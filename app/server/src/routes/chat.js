@@ -247,7 +247,11 @@ export default async function chatRoutes(fastify) {
       + profileBlock(profile)
       + '\n\n' + buildRagBlock(chunks);
     if (toolOut?.ran) {
-      sysContent += `\n\n【${toolOut.label}】\n${toolOut.output}\n（以上为脚本计算结果，解读必须与之一致；数值与文字不得改动）`;
+      // 脚本已执行：把「直接解读、别再触发」写死在结果旁边。
+      // 只靠人设约束不够——实测模型拿到结果后仍会再输出一次触发块（白跑脚本、不给解读）。
+      sysContent += `\n\n【${toolOut.label}】\n${toolOut.output}\n`
+        + '（以上为脚本计算结果，解读必须与之一致；数值与文字不得改动。'
+        + '脚本已经执行完毕，请直接据此解读，不要再输出【排盘请求】【起局请求】【抽牌请求】等触发块。）';
     }
 
     // —— system 消息的两种下法 ——
@@ -299,7 +303,7 @@ export default async function chatRoutes(fastify) {
           activePin ? `【${pinLabel(moduleId)}背景】\n` + activePin : '',
           profileBlock(profile),
           compactRag ? '【知识库摘录（回答时参考，禁止照抄）】\n' + compactRag : '',
-          toolOut?.ran ? `【${toolOut.label}】\n${toolOut.output.slice(0, 8000)}` : '',
+          toolOut?.ran ? `【${toolOut.label}】\n${toolOut.output.slice(0, 8000)}\n（脚本已执行完毕，请直接据此解读，不要再输出触发块）` : '',
           '【用户发言】\n' + content,
         ].filter(Boolean).join('\n\n');
 
