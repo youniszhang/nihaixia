@@ -119,6 +119,26 @@ chk "我的模块权限含 plan 来源" "True" "$(curl -s -b "$UJ" "$H/api/subsc
 import json,sys
 print(any(m['source']=='plan' for m in json.load(sys.stdin)['my_modules']))")"
 
+# 回归：会话列表必须带 module 字段。
+# 前端侧栏按 `(x.module || 'tcm') === 当前模块` 过滤；列表漏了 module 会让所有会话
+# 都被当成 tcm，非中医模块的「历史记录」整体消失（2026-09-22 生产事故）。
+# 之前只验了 POST /api/sessions 的返回，没验 GET /api/sessions，所以漏网。
+curl -s -b "$UJ" -X POST "$H/api/sessions" -H 'content-type: application/json' \
+  -d '{"module":"bazi","title":"八字回归"}' > /dev/null
+sess_list=$(curl -s -b "$UJ" "$H/api/sessions")
+chk "列表返回 module（八字会话= bazi）" "bazi" "$(echo "$sess_list" | python3 -c "
+import json,sys
+s=[x for x in json.load(sys.stdin)['sessions'] if x.get('title')=='八字回归']
+print(s[0].get('module','(字段缺失)') if s else '(未找到会话)')")"
+chk "列表里 tcm 会话仍是 tcm（未被误标）" "tcm" "$(echo "$sess_list" | python3 -c "
+import json,sys
+ss=json.load(sys.stdin)['sessions']
+print('tcm' if [x for x in ss if x.get('module')=='tcm'] else '(无 tcm 会话)')")"
+chk "侧栏过滤口径：八字模块只看到 1 条" "1" "$(echo "$sess_list" | python3 -c "
+import json,sys
+ss=json.load(sys.stdin)['sessions']
+print(len([x for x in ss if (x.get('module') or 'tcm')=='bazi']))")"
+
 echo
 echo "== 5. 管理员手动开通 = 永久（与订阅并存不被到期收走） =="
 uid=$(curl -s -b "$AJ" "$H/api/admin/users" | python3 -c "

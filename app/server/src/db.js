@@ -596,7 +596,10 @@ export function createSession(userId, title = '新问诊', pin = '', module = ''
   return { id, title, pin, module };
 }
 export function listSessions(userId) {
-  return db.prepare(`SELECT id, title, pin, created_at, updated_at,
+  // module 必须返回：前端侧栏按模块过滤（`(x.module || 'tcm') === mod.id`），
+  // 漏了这个字段所有会话都会被当成 tcm，非中医模块的侧栏就永远是空的
+  // （「历史记录消失」的根因，2026-09-22 修）。
+  return db.prepare(`SELECT id, title, pin, created_at, updated_at, module,
       (SELECT COUNT(*) FROM messages m WHERE m.session_id = sessions.id AND m.role='user') AS msg_count
     FROM sessions WHERE user_id = ? ORDER BY updated_at DESC`).all(userId);
 }
