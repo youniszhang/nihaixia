@@ -100,8 +100,8 @@ for (const topic of list) {
   if (args.dry) { console.log(`  DRY ${topic}`); done++; continue; }
 
   const chunks = MODULE_ID === 'tcm'
-    ? retrieve(topic, 8)
-    : retrieveForModule(topic, mod, 8, 7000);
+    ? retrieve(`${mod.name} ${mod.tagline} ${topic}`, 8)
+    : retrieveForModule(`${mod.name} ${mod.tagline} ${topic}`, mod, 8, 7000);
   const prompt = chapterPrompt(mod.name, topic, buildRagBlock(chunks));
 
   let html = null;

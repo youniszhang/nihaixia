@@ -89,11 +89,14 @@ function judgeAnswer(type, correct, userAnswer) {
   return String(correct).trim().toUpperCase() === String(userAnswer).trim().toUpperCase();
 }
 
-// RAG 检索（学习内容与聊天共用同一套模块知识库）
+// RAG 检索（学习内容与聊天共用同一套模块知识库）。
+// 查询串拼上模块名与 tagline：目录标题常是「入门/什么是」这类泛化词，
+// 光靠 topic 检索会 0 命中（tarot 实测），补模块核心术语保证召回。
 function studyRagBlock(moduleId, mod, topic) {
+  const query = `${mod.name} ${mod.tagline} ${topic}`;
   const chunks = moduleId === 'tcm'
-    ? retrieve(topic, 8)
-    : retrieveForModule(topic, mod, 8, 7000);
+    ? retrieve(query, 8)
+    : retrieveForModule(query, mod, 8, 7000);
   return buildRagBlock(chunks);
 }
 
