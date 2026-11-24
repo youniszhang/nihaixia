@@ -1326,3 +1326,249 @@ export function userHasModule(user, moduleId) {
   if (g) return Boolean(g.enabled);
   return MODULE_DEFAULT_GRANTS.has(moduleId);
 }
+
+// ================= 玄枢 · 学习练习（study） =================
+//
+// 学习中心：AI 基于模块知识库（RAG）生成 HTML 学习章节 + 测验题，做错自动入错题集。
+// 数据只到「模块」粒度（章节对全部有模块权限的用户共享），答题记录与错题集按用户隔离。
+//
+//   study_chapters  章节本体（HTML 内容，服务端白名单净化后入库）
+//   study_attempts  答题记录（一人一题一条，重复答题覆盖：掌握态以最新为准）
+//   study_wrongs    错题集（答错/判不合格即入集；答对且连续 2 次答对自动移出；
+//                    removed 标记保留记录，方便「重新加入错题集」时续接计数）
+
+db.exec(`
+-- 学习章节：生成一次持久复用（同一模块的所有用户共享题库与教材）
+CREATE TABLE IF NOT EXISTS study_chapters (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, -- 生成者（仅记录来源，全员可见）
+  module_id TEXT NOT NULL DEFAULT 'tcm',
+  title TEXT NOT NULL,
+  topic TEXT NOT NULL DEFAULT '',       -- 生成时的话题（含自定义话题）
+  content_html TEXT NOT NULL DEFAULT '', -- 白名单净化后的 HTML 正文
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_study_ch_module ON study_chapters(module_id, id DESC);
+
+-- 题目：出题后落库（answer/explanation 服务端持有，下发前端时剥离）
+CREATE TABLE IF NOT EXISTS study_questions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chapter_id INTEGER NOT NULL REFERENCES study_chapters(id) ON DELETE CASCADE,
+  module_id TEXT NOT NULL DEFAULT 'tcm',
+  type TEXT NOT NULL DEFAULT 'single',  -- single | multi | tf
+  ord INTEGER NOT NULL DEFAULT 0,       -- 章内顺序
+  stem TEXT NOT NULL,
+  options_json TEXT NOT NULL DEFAULT '[]',
+  answer TEXT NOT NULL DEFAULT '',
+  explanation TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_study_q_ch ON study_questions(chapter_id, ord);
+
+-- 答题记录：一人一题一条（重复作答覆盖，last_result 记最新状态）
+CREATE TABLE IF NOT EXISTS study_attempts (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  question_id INTEGER NOT NULL REFERENCES study_questions(id) ON DELETE CASCADE,
+  module_id TEXT NOT NULL DEFAULT 'tcm',
+  type TEXT NOT NULL DEFAULT 'single',
+  stem TEXT NOT NULL,                   -- 题干快照（题目被删后错题仍可独立展示）
+  options_json TEXT NOT NULL DEFAULT '[]',
+  answer TEXT NOT NULL DEFAULT '',      -- 服务端判题用的正确答案
+  explanation TEXT NOT NULL DEFAULT '',
+  user_answer TEXT NOT NULL DEFAULT '',
+  last_result TEXT NOT NULL DEFAULT '',  -- correct | wrong（最新一次判题结果）
+  correct_count INTEGER NOT NULL DEFAULT 0,
+  wrong_count INTEGER NOT NULL DEFAULT 0,
+  answered_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, question_id)
+);
+CREATE INDEX IF NOT EXISTS idx_study_att_user ON study_attempts(user_id, module_id);
+
+-- 错题集：进入 = 答错；移出 = 答对且连续 2 次答对（streak 达 2）
+CREATE TABLE IF NOT EXISTS study_wrongs (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  question_id INTEGER NOT NULL,         -- 指向 study_questions.id（题目删除时置 0 保留快照）
+  module_id TEXT NOT NULL DEFAULT 'tcm',
+  stem TEXT NOT NULL,
+  options_json TEXT NOT NULL DEFAULT '[]',
+  answer TEXT NOT NULL DEFAULT '',
+  explanation TEXT NOT NULL DEFAULT '',
+  user_answer TEXT NOT NULL DEFAULT '',  -- 最近一次答错时的作答
+  chapter_id INTEGER,                   -- 所属章节（可空：原章节可能已被删）
+  chapter_title TEXT DEFAULT '',
+  streak INTEGER NOT NULL DEFAULT 0,    -- 答错后连续答对次数；达 2 自动移出
+  removed INTEGER NOT NULL DEFAULT 0,   -- 移出标记（记录保留，可随时重新练）
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, question_id)
+);
+CREATE INDEX IF NOT EXISTS idx_study_wr_user ON study_wrongs(user_id, module_id, removed);
+`);
+
+// ---------- study: chapters ----------
+export function createStudyChapter({ userId, moduleId, title, topic, contentHtml }) {
+  const r = db.prepare(`INSERT INTO study_chapters (user_id, module_id, title, topic, content_html)
+    VALUES (?,?,?,?,?)`).run(userId, moduleId, String(title).slice(0, 80), String(topic).slice(0, 120), String(contentHtml));
+  return getStudyChapter(Number(r.lastInsertRowid));
+}
+export function getStudyChapter(id) {
+  return db.prepare('SELECT * FROM study_chapters WHERE id = ?').get(id) || null;
+}
+export function listStudyChapters(moduleId, limit = 200) {
+  return db.prepare(`SELECT id, user_id, module_id, title, topic, created_at, length(content_html) AS content_len
+    FROM study_chapters WHERE module_id = ? ORDER BY id DESC LIMIT ?`).all(moduleId, Math.min(Number(limit) || 200, 500));
+}
+// 快照 id：题目被删后错题行的 question_id 改为 -原id（负值）。
+// 不能用 0：同一用户多条错题都置 0 会撞 (user_id, question_id) 主键。
+// 负值天然唯一且不会与自增的真实题目 id（恒正）冲突。
+export function wrongSnapshotId(questionId) {
+  return -Math.abs(Number(questionId) || 0);
+}
+
+export function deleteStudyChapter(id) {
+  // 章节删除：题目按外键级联清掉；错题集的题干快照保留（question_id 转为负值快照 id）
+  db.exec('BEGIN');
+  try {
+    db.prepare(`UPDATE study_wrongs SET question_id = -question_id, chapter_id = NULL
+      WHERE question_id IN (SELECT id FROM study_questions WHERE chapter_id = ?)`).run(id);
+    db.prepare('DELETE FROM study_chapters WHERE id = ?').run(id);
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+}
+
+// ---------- study: questions ----------
+// 出题落库（整章替换：先清旧题再插入新题，answer/explanation 只留服务端）
+export function replaceStudyQuestions({ chapterId, moduleId, questions }) {
+  db.exec('BEGIN');
+  try {
+    db.prepare(`UPDATE study_wrongs SET question_id = -question_id, chapter_id = NULL
+      WHERE question_id IN (SELECT id FROM study_questions WHERE chapter_id = ?)`).run(chapterId);
+    db.prepare('DELETE FROM study_questions WHERE chapter_id = ?').run(chapterId);
+    const stmt = db.prepare(`INSERT INTO study_questions (chapter_id, module_id, type, ord, stem, options_json, answer, explanation)
+      VALUES (?,?,?,?,?,?,?,?)`);
+    const ids = [];
+    for (let i = 0; i < questions.length; i++) {
+      const q = questions[i];
+      const r = stmt.run(chapterId, moduleId, q.type, i, q.stem, JSON.stringify(q.options), q.answer, q.explanation);
+      ids.push(Number(r.lastInsertRowid));
+    }
+    db.exec('COMMIT');
+    return ids;
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+}
+// 取题（判题/重取用，含答案；chapter 不存在或没题返回 []）
+export function listStudyQuestions(chapterId) {
+  return db.prepare('SELECT * FROM study_questions WHERE chapter_id = ? ORDER BY ord ASC').all(chapterId);
+}
+// 取单题（错题重练用）
+export function getStudyQuestion(id) {
+  return db.prepare('SELECT * FROM study_questions WHERE id = ?').get(id) || null;
+}
+
+// ---------- study: attempts & wrongs ----------
+// 题干快照（供错题展示，不依赖题目存续）
+function attemptSnapshot(q, userAnswer, moduleId) {
+  return {
+    module_id: moduleId,
+    type: q.type || 'single',
+    stem: q.stem || '',
+    options_json: typeof q.options_json === 'string' ? q.options_json : JSON.stringify(Array.isArray(q.options) ? q.options : []),
+    answer: String(q.answer ?? ''),
+    explanation: String(q.explanation ?? ''),
+    user_answer: String(userAnswer ?? ''),
+    chapter_id: q.chapter_id ?? null,
+    chapter_title: String(q.chapter_title ?? ''),
+  };
+}
+
+// 记一次答题（覆盖式：一人一题一条）。
+// 返回 { attempt, wrong, in_wrong_set, removed } 供前端展示「进错题集 / 已移出」。
+export function recordStudyAttempt({ userId, question, userAnswer, isCorrect, moduleId }) {
+  const snap = attemptSnapshot(question, userAnswer, moduleId);
+  const prev = db.prepare('SELECT correct_count, wrong_count, last_result FROM study_attempts WHERE user_id = ? AND question_id = ?')
+    .get(userId, question.id);
+  const correctCount = (prev?.correct_count || 0) + (isCorrect ? 1 : 0);
+  const wrongCount = (prev?.wrong_count || 0) + (isCorrect ? 0 : 1);
+  db.prepare(`INSERT INTO study_attempts (user_id, question_id, module_id, type, stem, options_json, answer, explanation,
+      user_answer, last_result, correct_count, wrong_count, answered_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?, datetime('now'))
+    ON CONFLICT(user_id, question_id) DO UPDATE SET
+      module_id = excluded.module_id, type = excluded.type, stem = excluded.stem,
+      options_json = excluded.options_json, answer = excluded.answer, explanation = excluded.explanation,
+      user_answer = excluded.user_answer, last_result = excluded.last_result,
+      correct_count = excluded.correct_count, wrong_count = excluded.wrong_count,
+      answered_at = datetime('now')`)
+    .run(userId, question.id, snap.module_id, snap.type, snap.stem, snap.options_json,
+      snap.answer, snap.explanation, snap.user_answer, isCorrect ? 'correct' : 'wrong',
+      correctCount, wrongCount);
+  const attempt = db.prepare('SELECT * FROM study_attempts WHERE user_id = ? AND question_id = ?').get(userId, question.id);
+
+  // —— 错题集联动 ——
+  let wrong = null;
+  let removed = false;
+  if (!isCorrect) {
+    // 答错：入集（removed 重置为 0、streak 清零）
+    db.prepare(`INSERT INTO study_wrongs (user_id, question_id, module_id, stem, options_json, answer, explanation,
+        user_answer, chapter_id, chapter_title, streak, removed, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,0,0, datetime('now'))
+      ON CONFLICT(user_id, question_id) DO UPDATE SET
+        stem = excluded.stem, options_json = excluded.options_json, answer = excluded.answer,
+        explanation = excluded.explanation, user_answer = excluded.user_answer,
+        chapter_id = excluded.chapter_id, chapter_title = excluded.chapter_title,
+        streak = 0, removed = 0, updated_at = datetime('now')`)
+      .run(userId, question.id, snap.module_id, snap.stem, snap.options_json, snap.answer,
+        snap.explanation, snap.user_answer, snap.chapter_id, snap.chapter_title);
+    wrong = db.prepare('SELECT * FROM study_wrongs WHERE user_id = ? AND question_id = ?').get(userId, question.id);
+  } else {
+    // 答对：在集内才累计 streak；连续答对 2 次 → 自动移出
+    const row = db.prepare('SELECT streak, removed FROM study_wrongs WHERE user_id = ? AND question_id = ?')
+      .get(userId, question.id);
+    if (row && !row.removed) {
+      const streak = Number(row.streak || 0) + 1;
+      if (streak >= 2) {
+        db.prepare(`UPDATE study_wrongs SET streak = 0, removed = 1, updated_at = datetime('now')
+          WHERE user_id = ? AND question_id = ?`).run(userId, question.id);
+        removed = true;
+      } else {
+        db.prepare(`UPDATE study_wrongs SET streak = ?, updated_at = datetime('now')
+          WHERE user_id = ? AND question_id = ?`).run(streak, userId, question.id);
+      }
+    }
+  }
+  // 注意：移出后 studwrongs.removed=1 但记录保留，in_wrong_set 如实反映「当前是否在集」
+  const inWrongSet = db.prepare('SELECT removed FROM study_wrongs WHERE user_id = ? AND question_id = ?')
+    .get(userId, question.id);
+  return { attempt, removed, in_wrong_set: Boolean(inWrongSet && !inWrongSet.removed) };
+}
+
+// 错题集查询（默认只看在集的；all=1 连移出的历史也返回）
+export function listStudyWrongs(userId, moduleId, { includeRemoved = false } = {}) {
+  const where = ['user_id = ?', 'module_id = ?'];
+  if (!includeRemoved) where.push('removed = 0');
+  return db.prepare(`SELECT * FROM study_wrongs WHERE ${where.join(' AND ')} ORDER BY updated_at DESC LIMIT 500`)
+    .all(userId, moduleId);
+}
+
+// 学习统计（某模块）：已答题数 / 正确率 / 在集错题数
+export function studyStats(userId, moduleId) {
+  const a = db.prepare(`SELECT COUNT(*) AS answered,
+      SUM(CASE WHEN last_result = 'correct' THEN 1 ELSE 0 END) AS correct,
+      SUM(CASE WHEN last_result = 'wrong' THEN 1 ELSE 0 END) AS wrong
+    FROM study_attempts WHERE user_id = ? AND module_id = ?`).get(userId, moduleId);
+  const w = db.prepare('SELECT COUNT(*) AS n FROM study_wrongs WHERE user_id = ? AND module_id = ? AND removed = 0')
+    .get(userId, moduleId);
+  const c = db.prepare('SELECT COUNT(*) AS n FROM study_chapters WHERE module_id = ?').get(moduleId);
+  return {
+    chapters: c.n || 0,
+    answered: a.answered || 0,
+    correct: a.correct || 0,
+    wrong: a.wrong || 0,
+    wrong_set: w.n || 0,
+  };
+}

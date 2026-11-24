@@ -168,6 +168,43 @@ export const api = {
   listModules: () => request('/api/modules'),
   authorizeModule: (moduleId, note = '') => request('/api/modules/authorize', { method: 'POST', body: { module_id: moduleId, note } }),
 
+  // 玄枢学习中心
+  studyHome: (moduleId) => request(`/api/study/${moduleId}`),
+  studyChapter: (id) => request(`/api/study/chapter/${id}`),
+  studyDeleteChapter: (id) => request(`/api/study/chapter/${id}`, { method: 'DELETE' }),
+  studyQuiz: (moduleId, chapterId, count = 5) => request(`/api/study/${moduleId}/quiz`, { method: 'POST', body: { chapter_id: chapterId, count } }),
+  studySubmit: (moduleId, chapterId, answers) => request(`/api/study/${moduleId}/submit`, { method: 'POST', body: { chapter_id: chapterId, answers } }),
+  studyWrongs: (moduleId, all = false) => request(`/api/study/${moduleId}/wrongs${all ? '?all=1' : ''}`),
+  studyWrongsSubmit: (moduleId, answers) => request(`/api/study/${moduleId}/wrongs/submit`, { method: 'POST', body: { answers } }),
+  // 章节生成为 SSE 流式（同 streamChat 模式）
+  streamStudyGenerate: async function* (moduleId, topic, signal) {
+    const res = await fetch(`/api/study/${moduleId}/generate`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic }),
+      signal,
+    });
+    if (!res.ok) throw new ApiError(await parseError(res), res.status);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      buffer += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buffer.indexOf('\n\n')) >= 0) {
+        const raw = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        for (const line of raw.split('\n')) {
+          if (!line.startsWith('data:')) continue;
+          try { yield JSON.parse(line.slice(5)); } catch { /* ignore malformed */ }
+        }
+      }
+    }
+  },
+
   // 管理后台：模块管理
   adminModules: () => request('/api/admin/modules'),
   adminPatchModule: (id, patch) => request(`/api/admin/modules/${id}`, { method: 'PATCH', body: patch }),

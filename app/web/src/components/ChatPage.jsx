@@ -35,7 +35,7 @@ function stripToolTrigger(text) {
   return String(text || '').replace(new RegExp(TOOL_TRIGGER_RE.source, 'g'), '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-export default function ChatPage({ module, onBackToPortal }) {
+export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
   const { user, logout } = useAuth();
   const [sessions, setSessions] = useState([]);
   const [activeId, setActiveId] = useState(null);
@@ -522,6 +522,11 @@ export default function ChatPage({ module, onBackToPortal }) {
           {isTcm && (
             <button className="icon-btn" onClick={() => setShowIntake(true)} title="十问 / 舌象 快速问诊单" aria-label="问诊单">
               <Icon name="stethoscope" size={20} />
+            </button>
+          )}
+          {onEnterStudy && (
+            <button className="icon-btn" onClick={onEnterStudy} title="学习中心：AI 出章节、练习与错题集" aria-label="学习中心">
+              <Icon name="book-open" size={20} />
             </button>
           )}
         </header>

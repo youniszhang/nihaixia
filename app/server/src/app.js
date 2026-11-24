@@ -17,6 +17,7 @@ import subscriptionRoutes from './routes/subscription.js';
 import internalRoutes from './routes/internal.js';
 import systemRoutes from './routes/system.js';
 import moduleRoutes from './routes/modules.js';
+import studyRoutes from './routes/study.js';
 import { loadKnowledge } from './knowledge/loader.js';
 import { redact } from './lib/redact.js';
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
@@ -114,6 +115,7 @@ export async function startServer() {
   await app.register(checkinRoutes, { prefix: '/api/checkin' });
   await app.register(subscriptionRoutes, { prefix: '/api/subscription' });
   await app.register(moduleRoutes, { prefix: '/api/modules' });
+  await app.register(studyRoutes, { prefix: '/api/study' });
   await app.register(adminRoutes, { prefix: '/api/admin' });
   await app.register(adminUserRoutes, { prefix: '/api/admin' });
   await app.register(systemRoutes, { prefix: '/api/system' });
