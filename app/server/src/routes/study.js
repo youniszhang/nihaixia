@@ -19,6 +19,7 @@ import {
   createStudyChapter, getStudyChapter, listStudyChapters, deleteStudyChapter,
   replaceStudyQuestions, listStudyQuestions, getStudyQuestion,
   recordStudyAttempt, listStudyWrongs, studyStats,
+  fillStudyChapter, seedStudySyllabus,
 } from '../db.js';
 import * as dbModule from '../db.js';
 import { getModule } from '../modules/registry.js';
@@ -26,7 +27,7 @@ import { retrieve, retrieveForModule } from '../knowledge/loader.js';
 import { buildRagBlock } from '../knowledge/system-prompt.js';
 import { streamChat } from '../llm.js';
 import { sanitizeStudyHtml } from '../lib/sanitizeHtml.js';
-import { chapterPrompt, quizPrompt } from '../lib/studyPrompts.js';
+import { chapterPrompt, quizPrompt, syllabusTopics } from '../lib/studyPrompts.js';
 import { errorRef } from '../lib/redact.js';
 import { sendError, clamp } from '../lib/validate.js';
 import { acquireGenerationSlot, release as releaseCapacity } from '../lib/capacity.js';
@@ -153,10 +154,19 @@ export default async function studyRoutes(fastify) {
     } catch { /* ignore */ }
   }
 
-  // —— 章节列表 + 统计 ——
+  // —— 章节列表 + 统计（首次访问自动铺内置课程目录） ——
   fastify.get('/:module', auth, async (req, reply) => {
     const mod = checkModule(req, reply);
     if (!mod) return;
+    // 内置目录：第一次有人打开学习中心时铺占位章节（幂等，只补缺）
+    try {
+      const topics = syllabusTopics(mod.id);
+      if (topics.length) {
+        seedStudySyllabus(mod.id, topics, req.user.id);
+      }
+    } catch (e) {
+      fastify.log.warn({ err: String(e) }, 'study syllabus seed failed');
+    }
     const chapters = listStudyChapters(mod.id);
     return {
       module: { id: mod.id, name: mod.name, tagline: mod.tagline, icon: mod.icon, color: mod.color },
@@ -173,6 +183,25 @@ export default async function studyRoutes(fastify) {
     if (!quota) return;
 
     const topic = clamp((req.body?.topic || '').trim(), 120) || mod.name;
+    // 两种生成模式：
+    //   ① chapter_id 指向目录占位章节 → 内容回填该行（内置课程「点开时生成」）
+    //   ② 无 chapter_id → 用户自定义话题，新插一行
+    const fillId = Number(req.body?.chapter_id || 0);
+    let target = null;
+    if (fillId) {
+      target = getStudyChapter(fillId);
+      if (!target || target.module_id !== mod.id) {
+        sse(reply, { type: 'error', message: '章节不存在。' });
+        reply.raw.end();
+        return;
+      }
+      // 已有内容 → 幂等直接返回（不重复生成、不扣额度）
+      if (target.content_html && target.content_html.length > 100) {
+        sse(reply, { type: 'done', chapter: target });
+        reply.raw.end();
+        return;
+      }
+    }
     const ragBlock = studyRagBlock(mod.id, mod, topic);
     const prompt = chapterPrompt(mod.name, topic, ragBlock);
 
@@ -212,7 +241,9 @@ export default async function studyRoutes(fastify) {
         sse(reply, { type: 'error', message: '本次生成内容为空或过短，请换个话题重试。' });
         return;
       }
-      const chapter = createStudyChapter({ userId: req.user.id, moduleId: mod.id, title: topic, topic, contentHtml: safeHtml });
+      const chapter = target
+        ? fillStudyChapter(target.id, safeHtml)   // 回填目录占位行
+        : createStudyChapter({ userId: req.user.id, moduleId: mod.id, title: topic, topic, contentHtml: safeHtml });
       chargeCredit(req.user.id, `学习章节生成 · ${mod.name}`);
       logStudyUsage(req.user.id, mod.id, prompt.length, full.length);
       sse(reply, { type: 'done', chapter });

@@ -4415,3 +4415,7 @@ body {
   .quiz-options { margin-left: 0; }
   .quiz-explain { margin-left: 0; }
 }
+
+.study-chapter-item.placeholder .study-chapter-main strong { color: var(--text-dim); }
+.study-chapter-item.placeholder .study-chapter-main small { color: var(--text-muted); font-style: italic; }
+.study-chapter-item.placeholder .study-chapter-actions .icon-btn.danger { display: none; }

@@ -1405,7 +1405,34 @@ CREATE TABLE IF NOT EXISTS study_wrongs (
 CREATE INDEX IF NOT EXISTS idx_study_wr_user ON study_wrongs(user_id, module_id, removed);
 `);
 
+// 老库补列（幂等）：学习章节的创建时间（早期建表漏了，SELECT 用到会 500）
+if (!tableColumns('study_chapters').includes('created_at')) {
+  db.exec("ALTER TABLE study_chapters ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now'))");
+}
+
 // ---------- study: chapters ----------
+// 内置课程目录的占位章节：title/topic 预置、content_html 为空（点开时按需生成回填）。
+// 幂等：只补目录里还没有同名 topic 的行，不动任何已有章节。
+export function seedStudySyllabus(moduleId, topics, adminUserId) {
+  const stmt = db.prepare(`INSERT INTO study_chapters (user_id, module_id, title, topic, content_html, created_at)
+    VALUES (?,?,?,?, '', datetime('now'))`);
+  const existing = new Set(db.prepare('SELECT topic FROM study_chapters WHERE module_id = ?').all(moduleId).map((r) => r.topic));
+  let added = 0;
+  for (const topic of topics) {
+    if (existing.has(topic)) continue;
+    // 目录章节按大纲顺序排列：ord 用负数（自增 id 是生成时间序，列表排序见 listStudyChapters 的处理）
+    stmt.run(adminUserId, moduleId, topic, topic);
+    added++;
+  }
+  return added;
+}
+
+// 生成回填：把内容写进目录占位行（而不是新插一行，保持目录稳定）
+export function fillStudyChapter(id, contentHtml) {
+  db.prepare('UPDATE study_chapters SET content_html = ? WHERE id = ?').run(String(contentHtml), id);
+  return getStudyChapter(id);
+}
+
 export function createStudyChapter({ userId, moduleId, title, topic, contentHtml }) {
   const r = db.prepare(`INSERT INTO study_chapters (user_id, module_id, title, topic, content_html)
     VALUES (?,?,?,?,?)`).run(userId, moduleId, String(title).slice(0, 80), String(topic).slice(0, 120), String(contentHtml));
@@ -1415,8 +1442,10 @@ export function getStudyChapter(id) {
   return db.prepare('SELECT * FROM study_chapters WHERE id = ?').get(id) || null;
 }
 export function listStudyChapters(moduleId, limit = 200) {
-  return db.prepare(`SELECT id, user_id, module_id, title, topic, created_at, length(content_html) AS content_len
-    FROM study_chapters WHERE module_id = ? ORDER BY id DESC LIMIT ?`).all(moduleId, Math.min(Number(limit) || 200, 500));
+  return db.prepare(`SELECT id, user_id, module_id, title, topic, created_at, length(content_html) AS content_len,
+      (content_html = '') AS is_placeholder
+    FROM study_chapters WHERE module_id = ? ORDER BY is_placeholder ASC, id ASC LIMIT ?`)
+    .all(moduleId, Math.min(Number(limit) || 200, 500));
 }
 // 快照 id：题目被删后错题行的 question_id 改为 -原id（负值）。
 // 不能用 0：同一用户多条错题都置 0 会撞 (user_id, question_id) 主键。

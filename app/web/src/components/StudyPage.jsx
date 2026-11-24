@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
+import { useAuth } from '../lib/store.jsx';
 import Icon from './Icon.jsx';
 
 // 玄枢 · 学习中心
@@ -79,6 +80,7 @@ function QuizQuestion({ q, index, answer, result, onChange }) {
 }
 
 export default function StudyPage({ module: mod, onBackToPortal }) {
+  const { user } = useAuth();
   const [view, setView] = useState('home'); // home | study | quiz | wrongs
   const [data, setData] = useState(null);   // { chapters, stats }
   const [err, setErr] = useState('');
@@ -113,14 +115,15 @@ export default function StudyPage({ module: mod, onBackToPortal }) {
   useEffect(() => { setErr(''); setNotice(''); }, [view]);
 
   // —— 生成章节（SSE 流式） ——
-  async function generate() {
+  // chapterId > 0 = 回填目录占位章节（内置课程「点开时生成」）；0 = 自定义新章节
+  async function generate(chapterId = 0, topicOverride = '') {
     setErr(''); setNotice('');
     setGenerating(true); setGenPreview('');
     const ac = new AbortController();
     abortRef.current = ac;
     try {
       let done = false;
-      for await (const ev of api.streamStudyGenerate(mod.id, topic.trim(), ac.signal)) {
+      for await (const ev of api.streamStudyGenerate(mod.id, topicOverride || topic.trim(), ac.signal, chapterId)) {
         if (ev.type === 'queue') setNotice(`排队中（第 ${ev.position} 位，预计 ${ev.est_wait_s}s）`);
         else if (ev.type === 'delta') {
           setGenPreview((s) => (s + ev.text).slice(-3000));
@@ -129,11 +132,10 @@ export default function StudyPage({ module: mod, onBackToPortal }) {
           setErr(ev.message || '生成失败');
         } else if (ev.type === 'done') {
           done = true;
-          setNotice(`章节「${ev.chapter?.title || ''}」已生成`);
+          setNotice(chapterId ? `「${ev.chapter?.title || ''}」已就绪` : `章节「${ev.chapter?.title || ''}」已生成`);
           loadHome();
-          setView('study');
           setChapter({ chapter: ev.chapter });
-          // 生成后自动出题体验更好，但题也要烧一次额度，改为用户主动触发
+          setView('study');
         }
       }
       if (!done && !err) setErr('生成被中断，请重试');
@@ -149,6 +151,14 @@ export default function StudyPage({ module: mod, onBackToPortal }) {
     setLoadingCh(true); setErr('');
     try {
       const d = await api.studyChapter(id);
+      const ch = d.chapter;
+      if (ch && (!ch.content_html || ch.content_html.length <= 100)) {
+        // 内置课程目录的占位章节：点开时生成（首人触发，生成过全员共享）
+        setView('home');
+        setLoadingCh(false);
+        await generate(id, ch.topic || ch.title);
+        return;
+      }
       setChapter(d);
       setView('study');
     } catch (e) { setErr(e.message); }
@@ -299,14 +309,20 @@ export default function StudyPage({ module: mod, onBackToPortal }) {
               ) : (
                 <ul className="study-chapter-list">
                   {data.chapters.map((c) => (
-                    <li key={c.id} className="study-chapter-item card">
+                    <li key={c.id} className={`study-chapter-item card ${c.is_placeholder ? 'placeholder' : ''}`}>
                       <button className="study-chapter-main" onClick={() => openChapter(c.id)}>
                         <strong>{c.title}</strong>
-                        <small>{c.topic && c.topic !== c.title ? `主题：${c.topic} · ` : ''}{String(c.created_at || '').slice(0, 10)} · 约 {Math.max(1, Math.round((c.content_len || 0) / 500))} 分钟阅读</small>
+                        <small>
+                          {c.is_placeholder
+                            ? '内置课程 · 首次打开时生成（约半分钟，之后永久可用）'
+                            : `${c.topic && c.topic !== c.title ? `主题：${c.topic} · ` : ''}${String(c.created_at || '').slice(0, 10)} · 约 ${Math.max(1, Math.round((c.content_len || 0) / 500))} 分钟阅读`}
+                        </small>
                       </button>
                       <div className="study-chapter-actions">
                         <button className="icon-btn" title="阅读" onClick={() => openChapter(c.id)}><Icon name="book-open" size={16} /></button>
-                        <button className="icon-btn danger" title="删除" onClick={() => removeChapter(c.id)}><Icon name="trash" size={16} /></button>
+                        {c.user_id === (user?.id) || user?.is_admin ? (
+                          <button className="icon-btn danger" title="删除" onClick={() => removeChapter(c.id)}><Icon name="trash" size={16} /></button>
+                        ) : null}
                       </div>
                     </li>
                   ))}
