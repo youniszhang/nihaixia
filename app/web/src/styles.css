@@ -4419,3 +4419,20 @@ body {
 .study-chapter-item.placeholder .study-chapter-main strong { color: var(--text-dim); }
 .study-chapter-item.placeholder .study-chapter-main small { color: var(--text-muted); font-style: italic; }
 .study-chapter-item.placeholder .study-chapter-actions .icon-btn.danger { display: none; }
+
+/* 学习中心里的返回按钮：页头是浅色背景（--bg-card），不能用深色侧栏的
+   白字 .back-portal 原样式——这里覆写为浅色主题下的可读样式 */
+.study-header .back-portal,
+.study-reader-head .back-portal {
+  margin: 0;
+  color: var(--text);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  opacity: 1;
+}
+.study-header .back-portal:hover,
+.study-reader-head .back-portal:hover {
+  background: var(--bg-card);
+  border-color: var(--jade);
+  color: var(--jade);
+}
