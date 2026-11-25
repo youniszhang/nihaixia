@@ -29,6 +29,8 @@ function publicConfig() {
     invite_required: inviteRequired() && !registrationRequiresBootstrap(),
     // 仅提示是否由配置文件指定管理员，不泄露用户名
     admin_configured: Boolean(configuredAdminUsername()),
+    // 皮肤：warm（默认暖色）| ink（墨韵）。登录前也要能切肤，所以走公开端点。
+    theme: getSetting('theme') || 'warm',
   };
 }
 

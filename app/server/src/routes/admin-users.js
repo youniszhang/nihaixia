@@ -349,6 +349,7 @@ export default async function adminUserRoutes(fastify) {
       turnstile_secret_set: Boolean(cs.secretKey),
       turnstile_active: cs.captchaEnabled,
       default_credits: getSetting('default_credits') ?? '',
+      theme: getSetting('theme') || 'warm',
     };
   };
 
@@ -360,6 +361,15 @@ export default async function adminUserRoutes(fastify) {
   fastify.put('/site', admin, async (req, reply) => {
     if (!requireAdmin(req, reply)) return;
     const b = req.body || {};
+    // 皮肤切换（warm | ink）：全站即时生效（前端按 /api/auth/config 拉取）
+    if (b.theme != null) {
+      const t = ['warm', 'ink'].includes(String(b.theme)) ? String(b.theme) : 'warm';
+      setSetting('theme', t);
+      addAudit({
+        actor: req.user, action: 'site.theme',
+        target: t === 'ink' ? '切换到墨韵皮肤' : '切换到暖色皮肤', detail: '',
+      });
+    }
     if (b.registration_enabled != null) {
       setSetting('registration_enabled', b.registration_enabled ? 'true' : 'false');
       addAudit({

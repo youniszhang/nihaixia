@@ -1,0 +1,92 @@
+/* ===== 墨韵皮肤（正式版）=====
+   挂载条件：html[data-theme="ink"]（main.jsx 按服务端设置写入）。
+   复用 shuimo-ui 中国色体系 + 宣纸纹理 + 双线墨框技法。 */
+
+html[data-theme='ink'] {
+  --bg: #E4DFD3;
+  --bg-card: #F8F4EA;
+  --bg-elevated: #E0D8C6;
+  --sidebar: #151D29;
+  --sidebar-hover: #232C3B;
+  --sidebar-active: #2E394A;
+  --red: #861717;
+  --red-light: #A81C2B;
+  --jade: #223E36;
+  --jade-light: #2E554A;
+  --amber: #6B798E;
+  --amber-light: #8A97A8;
+  --gold: #45465E;
+  --text: #2B333E;
+  --text-dim: #5A626E;
+  --text-muted: #8A909B;
+  --text-inverse: #E6E2D8;
+  --border: rgba(91, 97, 109, 0.35);
+  --border-light: rgba(91, 97, 109, 0.18);
+  --shadow: 0 2px 10px rgba(21, 29, 41, 0.10);
+}
+
+/* 宣纸纹理铺底 */
+html[data-theme='ink'] body {
+  background-image: url('/themes/ink-paper.webp');
+  background-size: cover;
+  background-attachment: fixed;
+  background-color: var(--bg);
+}
+
+/* 半透明纸面卡片 + 双线墨框 */
+html[data-theme='ink'] .card,
+html[data-theme='ink'] .sheet,
+html[data-theme='ink'] .module-card,
+html[data-theme='ink'] .auth-card,
+html[data-theme='ink'] .msg.assistant .msg-body,
+html[data-theme='ink'] .study-main .card {
+  background: rgba(248, 244, 234, 0.88);
+  border: 3px double rgba(43, 51, 62, 0.4);
+  border-radius: 2px;
+}
+
+/* 按钮：shuimo 式菘蓝底 + 双线 */
+html[data-theme='ink'] .btn-primary {
+  background: var(--amber);
+  border: 5px double #E6E2D8;
+  border-radius: 2px;
+  color: #F5F3EC;
+}
+html[data-theme='ink'] .btn-primary:hover { background: var(--amber-light); }
+html[data-theme='ink'] .btn-ghost {
+  border: 3px double rgba(43, 51, 62, 0.45);
+  border-radius: 2px;
+  color: var(--text);
+  background: rgba(248, 244, 234, 0.6);
+}
+
+/* 印章红只用于关键标记 */
+html[data-theme='ink'] .portal-seal,
+html[data-theme='ink'] .brand-seal { background: var(--red); color: #F5F3EC; border-radius: 2px; }
+html[data-theme='ink'] .module-chip { background: var(--jade); color: #F5F3EC; }
+html[data-theme='ink'] .module-card .module-icon { background: var(--jade); border-radius: 2px; }
+html[data-theme='ink'] .module-card .module-enter-btn { background: var(--red); border-radius: 2px; }
+html[data-theme='ink'] .study-icon { background: var(--jade); }
+html[data-theme='ink'] .study-doc h3 { border-left: 3px solid var(--red); }
+html[data-theme='ink'] .study-doc blockquote { border-left: 3px solid var(--gold); background: rgba(224, 216, 198, 0.5); }
+html[data-theme='ink'] .study-doc summary { color: var(--red); }
+html[data-theme='ink'] .study-stat b.hot { color: var(--red); }
+
+/* 答题选项 */
+html[data-theme='ink'] .quiz-option.picked,
+html[data-theme='ink'] .quiz-option.correct { border-color: var(--jade); background: rgba(34, 62, 54, 0.08); }
+html[data-theme='ink'] .quiz-option.picked .quiz-opt-letter,
+html[data-theme='ink'] .quiz-option.correct .quiz-opt-letter { background: var(--jade); border-color: var(--jade); }
+html[data-theme='ink'] .quiz-option.wrong-pick { border-color: var(--red); background: rgba(134, 23, 23, 0.06); }
+html[data-theme='ink'] .quiz-option.wrong-pick .quiz-opt-letter { background: var(--red); border-color: var(--red); }
+html[data-theme='ink'] .quiz-score.fail { color: var(--red); }
+
+/* 聊天气泡 */
+html[data-theme='ink'] .msg.user .msg-body { background: var(--jade); color: #F5F3EC; border-radius: 2px; }
+html[data-theme='ink'] .msg.user .msg-body * { color: #F5F3EC; }
+
+/* 顶栏 */
+html[data-theme='ink'] .main-header { background: rgba(228, 223, 211, 0.9); backdrop-filter: blur(6px); }
+html[data-theme='ink'] .study-header { background: rgba(248, 244, 234, 0.9); }
+html[data-theme='ink'] .quota-badge { background: rgba(224, 216, 198, 0.8); color: var(--text); }
+html[data-theme='ink'] .study-tabs button.on { background: rgba(224, 216, 198, 0.8); }
