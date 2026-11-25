@@ -3,7 +3,7 @@ import Icon from './Icon.jsx';
 // 侧边栏：当前模块的会话历史 + 用户入口。图标统一用 Icon（SVG），不再用 emoji。
 export default function Sidebar({
   module, onBackToPortal, sessions, activeId, onSelect, onNew, onDelete, onProfile, onAdminConsole,
-  user, onLogout, onClose, quota, checkedInToday, onMembership,
+  user, onLogout, onClose, quota, checkedInToday, onMembership, onCollapse, collapsed,
 }) {
   const unlimited = quota?.unlimited;
   const credits = quota?.credits;
@@ -27,6 +27,16 @@ export default function Sidebar({
           <button className="btn-primary new-chat" onClick={onNew}>
             <Icon name="plus" size={17} /> 新对话
           </button>
+          {onCollapse && (
+            <button
+              className="icon-btn sidebar-collapse-btn"
+              onClick={onCollapse}
+              title={collapsed ? '展开侧边栏' : '收起侧边栏'}
+              aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
+            >
+              <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={17} />
+            </button>
+          )}
         </div>
 
         <button className="back-portal" onClick={onBackToPortal} title="返回模块门户">

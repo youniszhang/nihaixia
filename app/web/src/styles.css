@@ -4439,13 +4439,23 @@ body {
 
 /* ===== 桌面端侧边栏收起/展开 ===== */
 /* 折叠态：侧栏缩成 0，由顶栏按钮切回（窄屏抽屉模式不受影响——mobile 覆盖） */
-.sidebar-toggle-btn { display: none; }
+/* 折叠按钮：放在侧栏顶部 brand 行右侧（深色底上用 inverse 色系） */
+.sidebar-collapse-btn {
+  display: none;
+  color: var(--text-inverse);
+}
+.sidebar-collapse-btn:hover { background: var(--sidebar-active); }
 @media (min-width: 769px) {
-  .sidebar-toggle-btn { display: flex; }
+  .sidebar-collapse-btn { display: flex; }
   .app-shell.sidebar-collapsed .sidebar {
     width: 0;
     min-width: 0;
     overflow: hidden;
     padding: 0;
   }
+  .app-shell.sidebar-collapsed .sidebar-collapse-btn { display: none; }
+}
+.sidebar-expand-btn { display: none; }
+@media (min-width: 769px) {
+  .app-shell.sidebar-collapsed .sidebar-expand-btn { display: flex; }
 }

@@ -487,6 +487,8 @@ export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
         onClose={() => setSidebarOpen(false)}
         quota={quota}
         checkedInToday={checkedInToday}
+        onCollapse={() => setSidebarCollapsed((v) => !v)}
+        collapsed={sidebarCollapsed}
       />
 
       <main className="main">
@@ -499,15 +501,17 @@ export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
           <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="菜单">
             <Icon name="menu" size={20} />
           </button>
-          {/* 桌面端侧边栏收起/展开（窄屏抽屉模式下不显示——那有自己的开合方式） */}
-          <button
-            className="icon-btn sidebar-toggle-btn"
-            onClick={() => setSidebarCollapsed((v) => !v)}
-            title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
-            aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
-          >
-            <Icon name={sidebarCollapsed ? 'chevron-right' : 'chevron-down'} size={18} />
-          </button>
+          {/* 侧栏折叠后顶栏的展开入口（折叠态才显示） */}
+          {sidebarCollapsed && (
+            <button
+              className="icon-btn sidebar-expand-btn"
+              onClick={() => setSidebarCollapsed(false)}
+              title="展开侧边栏"
+              aria-label="展开侧边栏"
+            >
+              <Icon name="chevron-right" size={18} />
+            </button>
+          )}
           <div className="header-title">
             <h1>
               <span className="module-chip" style={{ background: mod.color }}><Icon name={mod.icon} size={13} /> {mod.name}</span>
