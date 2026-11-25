@@ -256,6 +256,7 @@ export default async function studyRoutes(fastify) {
       const msg = err.code === 'no_api_key' ? '未配置模型通道：请联系管理员在「模型设置」中配置。'
         : err.code === 'auth' ? '模型服务鉴权失败：请联系管理员更新 API Key。'
         : err.code === 'rate_limit' ? '模型服务繁忙，请稍后重试。'
+        : err.code === 'model_not_found' ? '当前配置的模型名在上游已不可用。请管理员在「模型设置」中更换模型。'
         : `生成失败（错误编号 ${ref}），请稍后再试。`;
       sse(reply, { type: 'error', message: msg });
     } finally {

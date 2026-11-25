@@ -48,6 +48,12 @@ export async function* streamChat(messages, signal, cfg) {
     const e = new Error(`模型服务返回错误 (${res.status})`);
     e.code = res.status === 401 || res.status === 403 ? 'auth' : res.status === 429 ? 'rate_limit' : 'upstream';
     e.detail = body.slice(0, 300);
+    // 模型名已下架/不存在（上游改版后常见，404 + model_not_found）：
+    // 单独给错误码，让路由层提示「去模型设置改模型名」，而不是只甩一个错误编号。
+    if (/model_not_found|model.*not supported|model.*does not exist/i.test(body)) {
+      e.code = 'model_not_found';
+      e.modelHint = true;
+    }
     throw e;
   }
 

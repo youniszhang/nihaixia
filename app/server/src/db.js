@@ -1387,8 +1387,9 @@ CREATE INDEX IF NOT EXISTS idx_study_att_user ON study_attempts(user_id, module_
 -- 错题集：进入 = 答错；移出 = 答对且连续 2 次答对（streak 达 2）
 CREATE TABLE IF NOT EXISTS study_wrongs (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  question_id INTEGER NOT NULL,         -- 指向 study_questions.id（题目删除时置 0 保留快照）
+  question_id INTEGER NOT NULL,         -- 指向 study_questions.id（题目删除时转负值快照）
   module_id TEXT NOT NULL DEFAULT 'tcm',
+  type TEXT NOT NULL DEFAULT 'single',  -- 题型快照（错题重练时前端渲染选项交互用）
   stem TEXT NOT NULL,
   options_json TEXT NOT NULL DEFAULT '[]',
   answer TEXT NOT NULL DEFAULT '',
@@ -1408,6 +1409,10 @@ CREATE INDEX IF NOT EXISTS idx_study_wr_user ON study_wrongs(user_id, module_id,
 // 老库补列（幂等）：学习章节的创建时间（早期建表漏了，SELECT 用到会 500）
 if (!tableColumns('study_chapters').includes('created_at')) {
   db.exec("ALTER TABLE study_chapters ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now'))");
+}
+// 老库补列（幂等）：错题集的题型快照（错题重练前端要按题型渲染选项交互）
+if (!tableColumns('study_wrongs').includes('type')) {
+  db.exec("ALTER TABLE study_wrongs ADD COLUMN type TEXT NOT NULL DEFAULT 'single'");
 }
 
 // ---------- study: chapters ----------
@@ -1543,16 +1548,16 @@ export function recordStudyAttempt({ userId, question, userAnswer, isCorrect, mo
   let removed = false;
   if (!isCorrect) {
     // 答错：入集（removed 重置为 0、streak 清零）
-    db.prepare(`INSERT INTO study_wrongs (user_id, question_id, module_id, stem, options_json, answer, explanation,
+    db.prepare(`INSERT INTO study_wrongs (user_id, question_id, module_id, type, stem, options_json, answer, explanation,
         user_answer, chapter_id, chapter_title, streak, removed, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,0,0, datetime('now'))
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0, datetime('now'))
       ON CONFLICT(user_id, question_id) DO UPDATE SET
-        stem = excluded.stem, options_json = excluded.options_json, answer = excluded.answer,
+        type = excluded.type, stem = excluded.stem, options_json = excluded.options_json, answer = excluded.answer,
         explanation = excluded.explanation, user_answer = excluded.user_answer,
         chapter_id = excluded.chapter_id, chapter_title = excluded.chapter_title,
         streak = 0, removed = 0, updated_at = datetime('now')`)
-      .run(userId, question.id, snap.module_id, snap.stem, snap.options_json, snap.answer,
-        snap.explanation, snap.user_answer, snap.chapter_id, snap.chapter_title);
+      .run(userId, question.id, snap.module_id, snap.type, snap.stem, snap.options_json, snap.answer,
+        snap.explanation, snap.user_answer, snap.chapter_id, snap.chapter_title)
     wrong = db.prepare('SELECT * FROM study_wrongs WHERE user_id = ? AND question_id = ?').get(userId, question.id);
   } else {
     // 答对：在集内才累计 streak；连续答对 2 次 → 自动移出

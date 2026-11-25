@@ -166,7 +166,16 @@ echo
 echo "== 5. 章节列表 / 详情 / 删除（另一用户共享） =="
 LIST=$(curl -s -b "$TMP/u.jar" $B/study/tcm)
 chk "列表含新章节" "六经辨证入门" "$(echo "$LIST" | jq_get "['chapters'][0]['title']")"
-chk "统计章节数=1" "1" "$(echo "$LIST" | jq_get "['stats']['chapters']")"
+# 新行为：首次访问自动铺内置目录（tcm 25 章占位）+ 用户刚生成的一章
+chk "统计章节数≥26（含铺的目录）" "yes" "$(echo "$LIST" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+print('yes' if d['stats']['chapters'] >= 26 else 'no')")"
+chk "内置目录已铺占位" "yes" "$(echo "$LIST" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+phs=[c for c in d['chapters'] if c.get('is_placeholder')]
+print('yes' if len(phs) >= 25 else 'no')")"
 DET=$(curl -s -b "$TMP/u.jar" $B/study/chapter/$CHID)
 chk "详情含正文" "yes" "$(echo "$DET" | grep -q '麻黄汤' && echo yes || echo no)"
 chk "管理员也能读" "200" "$(curl -s -b "$TMP/admin.jar" -o /dev/null -w '%{http_code}' $B/study/chapter/$CHID)"
@@ -217,7 +226,8 @@ chk "解析已下发" "yes" "$(echo "$SUB2" | grep -q '麻黄汤' && echo yes ||
 echo
 echo "== 10. 删除章节（错题快照保留） =="
 chk "生成者删自己章节" "200" "$(curl -s -b "$TMP/u.jar" -o /dev/null -w '%{http_code}' -X DELETE $B/study/chapter/$CHID2)"
-chk "删除后列表减一" "1" "$(curl -s -b "$TMP/u.jar" $B/study/tcm | jq_get "['stats']['chapters']")"
+# 章节数 = 25 内置目录 + 1（主章节 CHID 还在，稍后删）
+chk "删除后剩 26（25 目录 + 主章）" "26" "$(curl -s -b "$TMP/u.jar" $B/study/tcm | jq_get "['stats']['chapters']")"
 # 删主章节（含题库）→ 章节与题目一并失效
 chk "章节删除" "200" "$(curl -s -b "$TMP/u.jar" -o /dev/null -w '%{http_code}' -X DELETE $B/study/chapter/$CHID)"
 chk "章节 404" "404" "$(curl -s -b "$TMP/u.jar" -o /dev/null -w '%{http_code}' $B/study/chapter/$CHID)"
