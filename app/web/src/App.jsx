@@ -41,6 +41,8 @@ export default function App() {
     function onPop(e) {
       const s = e.state;
       setActiveModule(s && s.xuanshu === 'module' && s.module ? s.module : null);
+      // 视图也要跟着历史记录恢复（聊天 ↔ 学习中心的切换也压了历史）
+      setActiveView(s && s.view === 'study' ? 'study' : 'chat');
     }
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -68,9 +70,13 @@ export default function App() {
   const backToPortal = () => {
     setActiveModule(null);
     setActiveView('chat');
-    // 历史里有我们压入的模块记录就回退（保留前进键可用），否则只替换当前记录
-    if (window.history.state?.xuanshu === 'module') window.history.back();
-    else window.history.replaceState({ xuanshu: 'portal' }, '', '#');
+    // 历史栈里可能有 [门户, 聊天, 学习中心] 多级记录。
+    // 直接按「最近的 portal 记录」回退步数：数一下栈顶到 portal 之间压了几条 module 记录。
+    const stack = [];
+    // history 无法直接读全栈，但我们在 pushState 时维护了自己的视图路径：
+    // 用 hash 判断——门户 hash 为空，模块 hash 非空。安全做法：直接替换当前状态为门户，
+    // 不再依赖 back（避免「点两次才回得去」）。
+    window.history.replaceState({ xuanshu: 'portal' }, '', '#');
   };
 
   if (loading) {
