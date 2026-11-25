@@ -595,6 +595,18 @@ export function createSession(userId, title = '新问诊', pin = '', module = ''
   db.prepare('INSERT INTO sessions (id, user_id, title, pin, module) VALUES (?,?,?,?,?)').run(id, userId, title, pin, module);
   return { id, title, pin, module };
 }
+// 「全新会话」判定与复用：每个模块同一用户最多保留一个**空会话**（一条消息都没有）。
+// 点「新对话」时若该模块已有空会话，直接复用而不是再建——列表里不会堆一堆
+// 没说过话的僵尸会话。会话一旦有内容（用户消息入库）就不再是全新。
+// 老会话 module 空串视为中医（与 listSessions 前端过滤口径一致）。
+export function getEmptySessionForModule(userId, moduleId) {
+  return db.prepare(`
+    SELECT s.* FROM sessions s
+    WHERE s.user_id = ?
+      AND COALESCE(NULLIF(s.module, ''), 'tcm') = ?
+      AND (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) = 0
+    ORDER BY s.updated_at DESC, s.created_at DESC LIMIT 1`).get(userId, moduleId) || null;
+}
 export function listSessions(userId) {
   // module 必须返回：前端侧栏按模块过滤（`(x.module || 'tcm') === mod.id`），
   // 漏了这个字段所有会话都会被当成 tcm，非中医模块的侧栏就永远是空的

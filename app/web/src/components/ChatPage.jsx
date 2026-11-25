@@ -43,6 +43,8 @@ export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // 桌面端侧边栏折叠态（窄屏抽屉式 sidebarOpen 不受影响；折叠是纯桌面行为）
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showIntake, setShowIntake] = useState(false);
   const [showAdminConsole, setShowAdminConsole] = useState(false);
@@ -240,7 +242,6 @@ export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
     setSessionTitle(session.title || mod.name);
     setSidebarOpen(false);
   }
-
   async function deleteSession(id) {
     if (!confirm('确定删除该记录？此操作不可恢复。')) return;
     await api.deleteSession(id).catch(() => {});
@@ -469,7 +470,7 @@ export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
   const intakeLabel = isTcm ? '十问 / 舌象' : '咨询背景';
 
   return (
-    <div className={`app-shell ${sidebarOpen ? 'sidebar-visible' : ''}`}>
+    <div className={`app-shell ${sidebarOpen ? 'sidebar-visible' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       <Sidebar
         module={mod}
         onBackToPortal={onBackToPortal}
@@ -497,6 +498,15 @@ export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
           </button>
           <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="菜单">
             <Icon name="menu" size={20} />
+          </button>
+          {/* 桌面端侧边栏收起/展开（窄屏抽屉模式下不显示——那有自己的开合方式） */}
+          <button
+            className="icon-btn sidebar-toggle-btn"
+            onClick={() => setSidebarCollapsed((v) => !v)}
+            title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
+            aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
+          >
+            <Icon name={sidebarCollapsed ? 'chevron-right' : 'chevron-down'} size={18} />
           </button>
           <div className="header-title">
             <h1>

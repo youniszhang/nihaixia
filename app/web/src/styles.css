@@ -4436,3 +4436,16 @@ body {
   border-color: var(--jade);
   color: var(--jade);
 }
+
+/* ===== 桌面端侧边栏收起/展开 ===== */
+/* 折叠态：侧栏缩成 0，由顶栏按钮切回（窄屏抽屉模式不受影响——mobile 覆盖） */
+.sidebar-toggle-btn { display: none; }
+@media (min-width: 769px) {
+  .sidebar-toggle-btn { display: flex; }
+  .app-shell.sidebar-collapsed .sidebar {
+    width: 0;
+    min-width: 0;
+    overflow: hidden;
+    padding: 0;
+  }
+}

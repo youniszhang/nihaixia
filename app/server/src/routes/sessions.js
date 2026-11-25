@@ -1,6 +1,6 @@
 import {
   createSession, listSessions, getSession, renameSession, updateSessionPin,
-  deleteSession, listMessages, listMessagesPage, userHasModule,
+  deleteSession, listMessages, listMessagesPage, userHasModule, getEmptySessionForModule,
 } from '../db.js';
 import { getModule, DEFAULT_MODULE } from '../modules/registry.js';
 import { sendError, clamp } from '../lib/validate.js';
@@ -31,8 +31,14 @@ export default async function sessionRoutes(fastify) {
     if (!userHasModule(req.user, moduleId)) {
       return sendError(reply, 'module_locked', `「${mod.name}」模块未开通，请联系管理员开通。`, 403);
     }
+    // 「新对话」复用：该模块已有空会话（一条消息都没有）时不再新建，返回那个。
+    // 已有内容的会话不算全新——用户说的「除非这个会话有内容有沟通」。
+    const empty = getEmptySessionForModule(req.user.id, moduleId);
+    if (empty) {
+      return reply.code(200).send({ session: getSession(empty.id), reused: true });
+    }
     const s = createSession(req.user.id, title || mod.name, pin, moduleId);
-    return reply.code(201).send({ session: getSession(s.id) });
+    return reply.code(201).send({ session: getSession(s.id), reused: false });
   });
 
   fastify.get('/:id', auth, async (req, reply) => {
