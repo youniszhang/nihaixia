@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
 import { AuthProvider } from './lib/store.jsx';
 import './styles.css';
+import './workbench.css';
 import './themes/ink.css';
 
 // 皮肤：服务端 settings.theme 经 /api/auth/config 下发（公开端点，登录前也要能切肤）。

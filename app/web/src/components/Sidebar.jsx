@@ -15,7 +15,7 @@ export default function Sidebar({
   return (
     <>
       <div className="sidebar-mask" onClick={onClose} />
-      <aside className="sidebar">
+      <aside id="chat-sidebar" className="sidebar" onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
         <div className="sidebar-top">
           <div className="brand">
             <span className="brand-seal" style={isTcm ? undefined : { background: module?.color }}>{module?.name?.slice(0, 1) || '玄'}</span>
@@ -24,6 +24,7 @@ export default function Sidebar({
               <small>{module?.tagline || '传统智慧 AI 工作台'}</small>
             </div>
           </div>
+          <button className="icon-btn sidebar-close-btn" onClick={onClose} aria-label="关闭菜单"><Icon name="close" size={18} /></button>
           <button className="btn-primary new-chat" onClick={onNew}>
             <Icon name="plus" size={17} /> 新对话
           </button>
@@ -33,8 +34,10 @@ export default function Sidebar({
               onClick={onCollapse}
               title={collapsed ? '展开侧边栏' : '收起侧边栏'}
               aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
+              aria-expanded={!collapsed}
+              aria-controls="chat-sidebar"
             >
-              <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={17} />
+              <Icon name="panel-left" size={18} />
             </button>
           )}
         </div>
@@ -44,15 +47,17 @@ export default function Sidebar({
         </button>
 
         <div className="session-list">
+          <p className="session-label">最近对话</p>
           {sessions.length === 0 && <p className="session-empty">还没有对话记录，点击上方开始。</p>}
           {sessions.map((s) => (
             <div
               key={s.id}
               className={`session-item ${s.id === activeId ? 'active' : ''}`}
-              onClick={() => onSelect(s.id)}
             >
-              <Icon name="message" size={15} className="session-icon" />
-              <span className="session-title">{s.title}</span>
+              <button className="session-select" onClick={() => onSelect(s.id)} aria-current={s.id === activeId ? 'page' : undefined}>
+                <Icon name="message" size={15} className="session-icon" />
+                <span className="session-title">{s.title}</span>
+              </button>
               <button
                 className="session-del"
                 title="删除"
@@ -92,7 +97,7 @@ export default function Sidebar({
           <div className="side-user">
             <span className="side-avatar">{user?.username?.slice(0, 1)?.toUpperCase() || 'U'}</span>
             <span className="side-username">{user?.username}</span>
-            <button className="side-logout" onClick={onLogout} title="退出登录">
+            <button className="side-logout" onClick={onLogout} title="退出登录" aria-label="退出登录">
               <Icon name="logout" size={15} />
             </button>
           </div>

@@ -6,10 +6,10 @@ export default function DisclaimerModal({ onAccept }) {
 
   return (
     <div className="overlay disclaimer-overlay">
-      <div className="sheet disclaimer-sheet">
+      <div className="sheet disclaimer-sheet" role="dialog" aria-modal="true" aria-labelledby="disclaimer-title">
         <div className="disclaimer-body">
           <div className="disclaimer-icon"><Icon name="alert" size={36} strokeWidth={1.6} /></div>
-          <h2>使用须知</h2>
+          <h2 id="disclaimer-title">使用须知</h2>
           <ul className="disclaimer-list">
             <li>本应用（<strong>玄枢</strong>）由 AI 生成内容，各模块角色设定仅供<strong>传统文化学习与学术研究</strong>。</li>
             <li>中医模块内容<strong>不构成医疗诊断、处方或治疗建议</strong>，不能替代执业医师的面对面诊疗；请勿仅依据 AI 建议自行抓药服用。</li>

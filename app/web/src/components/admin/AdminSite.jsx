@@ -57,7 +57,7 @@ export default function AdminSite() {
 
   async function toggleTheme() {
     const next = (site.theme || 'warm') === 'ink' ? 'warm' : 'ink';
-    await save({ theme: next }, next === 'ink' ? '已切换到墨韵皮肤' : '已切换到暖色皮肤');
+    await save({ theme: next }, next === 'ink' ? '已切换到文墨 · 云山问道' : '已切换到暖色皮肤');
     // 全站即时生效：改 html 属性 + 刷新快照
     document.documentElement.setAttribute('data-theme', next);
     try { localStorage.setItem('xuanshu_theme', next); } catch {}
@@ -72,9 +72,9 @@ export default function AdminSite() {
         <h3><Icon name="sparkles" size={16} /> 站点皮肤</h3>
         <div className="setting-row">
           <div>
-            <strong>墨韵皮肤（黑白灰水墨风）</strong>
+            <strong>文墨 · 云山问道</strong>
             <p className="setting-desc">
-              宣纸纹理底 + 墨黑侧栏 + 印章红点缀，全站即时生效（含登录页）。
+              云山淡墨、行楷题字、松墨侧栏与朱砂印章，营造静心问道的书卷意境。全站即时生效（含登录页）。
               关闭 = 默认暖色主题。皮肤是站点级设置，对所有用户统一。
             </p>
           </div>
@@ -84,7 +84,7 @@ export default function AdminSite() {
             disabled={busy}
             role="switch"
             aria-checked={(site.theme || 'warm') === 'ink'}
-            aria-label="墨韵皮肤"
+            aria-label="文墨 · 云山问道皮肤"
           >
             <span className="switch-knob" />
           </button>

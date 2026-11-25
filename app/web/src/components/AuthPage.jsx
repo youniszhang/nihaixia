@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/store.jsx';
+import InkLandscape from './InkLandscape.jsx';
 
 export default function AuthPage() {
   const { login, register } = useAuth();
@@ -65,16 +66,24 @@ export default function AuthPage() {
   return (
     <div className="auth-wrap">
       <div className="auth-hero" aria-hidden>
+        <div className="auth-brand"><span className="portal-seal">玄</span><span>玄枢<small>问道 · 修心 · 求真</small></span></div>
         <div className="auth-hero-inner">
-          <div className="auth-seal">玄</div>
-          <h1>玄枢</h1>
-          <p className="auth-quote">「观天之道，执天之行，尽矣。」</p>
-          <p className="auth-sub">八位先生，各守一艺 · 岐黄问诊 · 八字紫微 · 奇门风水 · 塔罗佛学</p>
+          <p className="eyebrow">云山有径 · 问学无涯</p>
+          <h2>一卷入玄，<br />问道山河。</h2>
+          <p className="auth-quote">以经典为引，与智慧对话。<br />在一问一答间，让传统的学问走近日常。</p>
+          <div className="auth-disciplines"><span>岐黄</span><span>命理</span><span>易学</span><span>禅思</span></div>
         </div>
+        <InkLandscape />
+        <p className="auth-colophon">一卷藏天地 · 八门见真知</p>
       </div>
 
       <div className="auth-panel">
         <form className="auth-card" onSubmit={onSubmit}>
+          <div className="auth-intro">
+            <span className="eyebrow">欢迎来到玄枢</span>
+            <h1>{mode === 'login' ? '别来无恙' : '开启问学之旅'}</h1>
+            <p>{mode === 'login' ? '登录账号，继续你的探索与研习。' : '创建账号，遇见属于你的传统智慧。'}</p>
+          </div>
           {/* 关闭注册后只剩一个页签，用 single 收窄，避免红色下划线被拉满整行 */}
           <div className={`auth-tabs ${canRegister ? '' : 'single'}`} role="tablist">
             <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'active' : ''} onClick={() => { setMode('login'); setErr(''); }}>登录</button>
@@ -139,7 +148,7 @@ export default function AuthPage() {
           {err && <p className="auth-error" role="alert">{err}</p>}
 
           <button className="btn-primary" type="submit" disabled={busy}>
-            {busy ? '请稍候…' : mode === 'login' ? '登 录' : '注 册'}
+            {busy ? '请稍候…' : mode === 'login' ? '登录，进入玄枢' : '创建账号'}
           </button>
 
           <p className="auth-foot">

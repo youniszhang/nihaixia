@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import Icon from './Icon.jsx';
+import InkLandscape from './InkLandscape.jsx';
 
 // 玄枢 · 模块门户：登录后的首屏。
 //
@@ -30,10 +31,10 @@ export default function ModulePortal({ user, catalog, onEnter, onMembership, onA
   }
   useEffect(() => { if (!modules) load(); }, []);
 
-  async function enter(m) {
+  async function enter(m, view = 'chat') {
     setErr(''); setNotice('');
     setBusyId(m.id);
-    try { await onEnter(m); } catch (e) { setErr(e.message); }
+    try { await onEnter(m, view); } catch (e) { setErr(e.message); }
     finally { setBusyId(null); }
   }
 
@@ -58,6 +59,7 @@ export default function ModulePortal({ user, catalog, onEnter, onMembership, onA
   const isAdmin = Boolean(user?.is_admin);
   const list = modules || [];
   const myCount = list.filter((m) => m.available).length;
+  const featured = list.find((m) => m.id === 'tcm' && m.available) || list.find((m) => m.available);
 
   // 权限来源标签（可用卡片上的一条小提示）
   function sourceLabel(m) {
@@ -75,7 +77,7 @@ export default function ModulePortal({ user, catalog, onEnter, onMembership, onA
           <span className="portal-seal">玄</span>
           <div>
             <strong>玄枢</strong>
-            <small>XuanShu · 传统智慧 AI 工作台</small>
+            <small>问道 · 修心 · 求真</small>
           </div>
         </div>
         <div className="portal-header-actions">
@@ -97,12 +99,28 @@ export default function ModulePortal({ user, catalog, onEnter, onMembership, onA
 
       <main className="portal-main">
         <div className="portal-hero">
-          <h1>玄枢 · 传统智慧 AI 工作台</h1>
-          <p>
-            八位先生，各守一艺。命理排盘交给脚本，解读归于角色——过程透明，口径可查。
-            {!isAdmin && <span className="portal-hero-hint">　你已开通 {myCount} / {list.length} 个模块，其余可按需开通或订阅。</span>}
-          </p>
+          <div className="portal-hero-copy">
+            <span className="eyebrow">玄枢问道 <span className="eyebrow-rule" /> 云山有径</span>
+            <h1>一念入玄，<br />问道山河。</h1>
+            <p>八位先生，各守一艺。<br />以经典为舟，在万象之间，寻一份通明。</p>
+            <span className="portal-welcome">{user?.username}，欢迎回来 <span>·</span> 已开通 {myCount} 项研习</span>
+          </div>
+          <InkLandscape />
+          {featured && (
+            <div className="portal-feature">
+              <div className="feature-kicker"><Icon name="book-open" size={16} /> 今日问学</div>
+              <h2>{featured.name}</h2>
+              <p>{featured.tagline}</p>
+              <div className="feature-actions">
+                <button className="btn-primary" disabled={busyId === featured.id} onClick={() => enter(featured)}><Icon name="message" size={16} /> 开始对话</button>
+                <button className="feature-study" disabled={busyId === featured.id} onClick={() => enter(featured, 'study')}>进入学习中心 <Icon name="arrow-right" size={15} /></button>
+              </div>
+              <span className="feature-foot">静心一问，开卷有得。<span className="feature-seal">问道</span></span>
+            </div>
+          )}
         </div>
+
+        <div className="portal-section-heading"><div><span className="eyebrow">各守一艺 · 各有所长</span><h2>诸门问道</h2></div><span>选择一位先生 · 共 {list.length} 门</span></div>
 
         {err && <p className="portal-error" role="alert">{err}</p>}
         {notice && <p className="portal-notice">{notice}</p>}
@@ -111,7 +129,7 @@ export default function ModulePortal({ user, catalog, onEnter, onMembership, onA
           <div className="chat-loading"><div className="loading-spinner" /><p>正在加载模块…</p></div>
         ) : (
           <section className="module-grid">
-            {list.map((m) => {
+            {list.map((m, index) => {
               const locked = !m.available;
               const offline = !m.site_enabled;
               const src = m.available ? sourceLabel(m) : null;
@@ -129,21 +147,19 @@ export default function ModulePortal({ user, catalog, onEnter, onMembership, onA
                     onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); enter(m); } },
                   } : {})}
                 >
-                  <span className="module-icon" style={{ background: m.color, ...(locked ? { filter: 'grayscale(0.55)', opacity: 0.6 } : {}) }}>
-                    <Icon name={m.icon} size={26} />
-                  </span>
+                  <div className="module-card-top"><span className="module-icon"><Icon name={m.icon} size={23} /></span><span className="module-number">{String(index + 1).padStart(2, '0')}</span></div>
                   <span className="module-name">
                     {m.name}
                     {locked && <span className="module-admin-flag module-lock-flag"><Icon name="lock" size={11} /> {offline ? '暂未开放' : '无权限'}</span>}
                   </span>
                   <span className="module-tagline">{m.tagline}</span>
 
-                  {m.has_tool && <span className="module-tool"><Icon name="zap" size={12} /> {m.tool_name}</span>}
-                  {src && <span className={`module-src ${src.cls}`}>{src.text}</span>}
+                  <div className="module-meta">{m.has_tool && <span className="module-tool"><Icon name="zap" size={12} /> {m.tool_name}</span>}
+                  {src && <span className={`module-src ${src.cls}`}>{src.text}</span>}</div>
 
                   {!locked ? (
                     <span className={`module-enter-btn ${busyId === m.id ? 'busy' : ''}`}>
-                      {busyId === m.id ? '进入中…' : <>进入 <Icon name="arrow-right" size={14} /></>}
+                      {busyId === m.id ? '进入中…' : <>开始探索 <Icon name="arrow-right" size={15} /></>}
                     </span>
                   ) : offline ? (
                     <span className="module-lock-note">该模块尚未上线，敬请期待</span>
@@ -174,6 +190,7 @@ export default function ModulePortal({ user, catalog, onEnter, onMembership, onA
             管理员视角：全部 {list.length} 个模块均可进入；标「未上线」的尚未对普通用户开放，可在「管理后台 → 模块管理」中上线。
           </p>
         )}
+        <footer className="portal-footer"><span>玄枢 <span className="footer-dot">·</span> 一卷藏天地，问学见真知</span><span>AI 辅助研习 · 内容仅供学习参考</span></footer>
       </main>
 
       {applyFor && (

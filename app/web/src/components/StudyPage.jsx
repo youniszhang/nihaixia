@@ -244,7 +244,7 @@ export default function StudyPage({ module: mod, onBackToPortal }) {
         <div className="study-title">
           <span className="study-icon" style={{ background: mod.color }}><Icon name="book-open" size={20} /></span>
           <div>
-            <strong>学习中心 · {mod.name}</strong>
+            <strong>藏经阁 · {mod.name}</strong>
             <small>{mod.tagline}</small>
           </div>
         </div>
@@ -262,54 +262,59 @@ export default function StudyPage({ module: mod, onBackToPortal }) {
       <main className="study-main">
         {view === 'home' && (
           <>
-            <section className="study-gen card">
-              <h2><Icon name="sparkles" size={17} /> AI 出学习章节</h2>
-              <p className="study-gen-hint">基于「{mod.name}」模块知识库生成 HTML 学习章节：内容可跟着学，学完可让 AI 出题测验。</p>
-              <div className="study-gen-row">
-                <input
-                  className="field study-topic-input"
-                  placeholder={`想学什么？如：${(mod.suggestions || [])[0] || mod.name + '基础'}`}
-                  value={topic}
-                  maxLength={120}
-                  onChange={(e) => setTopic(e.target.value)}
-                  disabled={generating}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !generating && topic.trim()) generate(); }}
-                />
-                {generating ? (
-                  <button className="btn-primary" onClick={() => abortRef.current?.abort()}>
-                    <Icon name="stop" size={15} /> 停止
-                  </button>
-                ) : (
-                  <button className="btn-primary" disabled={!topic.trim()} onClick={generate}>
-                    <Icon name="sparkles" size={15} /> 生成章节
-                  </button>
-                )}
-              </div>
-              {generating && (
-                <div className="study-gen-streaming">
-                  <div className="loading-spinner" />
-                  <p>{genPreview ? genPreview.slice(-500) : '正在检索知识库并撰写章节…'}</p>
+            <div className="study-home-intro"><span className="eyebrow">藏经阁 · {mod.name}</span><h1>读经明理，温故知新。</h1><p>读一章经典，解一个疑惑，让每一次学习都有所得。</p></div>
+            <div className="study-overview">
+              <section className="study-gen card">
+                <h2><Icon name="sparkles" size={18} /> 从一个问题，展开一章</h2>
+                <p className="study-gen-hint">输入想了解的主题，AI 将结合经典知识编写章节，并在学后为你出题巩固。</p>
+                <div className="study-gen-row">
+                  <input
+                    className="study-topic-input"
+                    aria-label="学习主题"
+                    placeholder={`想学什么？如：${(mod.suggestions || [])[0] || mod.name + '基础'}`}
+                    value={topic}
+                    maxLength={120}
+                    onChange={(e) => setTopic(e.target.value)}
+                    disabled={generating}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !generating && topic.trim()) generate(); }}
+                  />
+                  {generating ? (
+                    <button className="btn-primary" onClick={() => abortRef.current?.abort()}>
+                      <Icon name="stop" size={15} /> 停止
+                    </button>
+                  ) : (
+                    <button className="btn-primary" disabled={!topic.trim()} onClick={() => generate()}>
+                      <Icon name="sparkles" size={15} /> 生成章节
+                    </button>
+                  )}
                 </div>
-              )}
-            </section>
+                {generating && (
+                  <div className="study-gen-streaming">
+                    <div className="loading-spinner" />
+                    <p>{genPreview ? genPreview.slice(-500) : '正在检索知识库并撰写章节…'}</p>
+                  </div>
+                )}
+              </section>
 
-            <section className="study-stats-row">
-              <div className="study-stat card"><b>{stats.chapters || 0}</b><span>章节</span></div>
-              <div className="study-stat card"><b>{stats.answered || 0}</b><span>已答题</span></div>
-              <div className="study-stat card"><b>{pct(stats.correct, stats.answered)}%</b><span>正确率</span></div>
-              <div className="study-stat card"><b className={stats.wrong_set ? 'hot' : ''}>{stats.wrong_set || 0}</b><span>错题在集</span></div>
-            </section>
+              <section className="study-stats-row">
+                <div className="study-stat card"><b>{stats.chapters || 0}</b><span>章节</span></div>
+                <div className="study-stat card"><b>{stats.answered || 0}</b><span>已答题</span></div>
+                <div className="study-stat card"><b>{pct(stats.correct, stats.answered)}%</b><span>正确率</span></div>
+                <div className="study-stat card"><b className={stats.wrong_set ? 'hot' : ''}>{stats.wrong_set || 0}</b><span>错题在集</span></div>
+              </section>
+            </div>
 
             <section className="study-chapters">
-              <h3>章节列表</h3>
+              <div className="study-section-heading"><h2>经卷目录</h2><span>{data?.chapters?.length || 0} 个章节 · 按序研习，亦可随心选读</span></div>
               {!data ? (
                 <div className="chat-loading"><div className="loading-spinner" /><p>加载中…</p></div>
               ) : !data.chapters?.length ? (
                 <p className="study-empty">还没有章节。输入一个主题，让 AI 为你编写第一章。</p>
               ) : (
                 <ul className="study-chapter-list">
-                  {data.chapters.map((c) => (
+                  {data.chapters.map((c, index) => (
                     <li key={c.id} className={`study-chapter-item card ${c.is_placeholder ? 'placeholder' : ''}`}>
+                      <span className="chapter-number">{String(index + 1).padStart(2, '0')}</span>
                       <button className="study-chapter-main" onClick={() => openChapter(c.id)}>
                         <strong>{c.title}</strong>
                         <small>
@@ -319,9 +324,9 @@ export default function StudyPage({ module: mod, onBackToPortal }) {
                         </small>
                       </button>
                       <div className="study-chapter-actions">
-                        <button className="icon-btn" title="阅读" onClick={() => openChapter(c.id)}><Icon name="book-open" size={16} /></button>
+                        <button className="icon-btn" title="阅读" aria-label={`阅读${c.title}`} onClick={() => openChapter(c.id)}><Icon name="arrow-right" size={17} /></button>
                         {c.user_id === (user?.id) || user?.is_admin ? (
-                          <button className="icon-btn danger" title="删除" onClick={() => removeChapter(c.id)}><Icon name="trash" size={16} /></button>
+                          <button className="icon-btn danger" title="删除" aria-label={`删除${c.title}`} onClick={() => removeChapter(c.id)}><Icon name="trash" size={16} /></button>
                         ) : null}
                       </div>
                     </li>

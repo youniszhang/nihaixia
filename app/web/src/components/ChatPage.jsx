@@ -498,7 +498,7 @@ export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
           <button className="icon-btn back-btn" onClick={onBackToPortal} title="返回模块门户" aria-label="返回模块门户">
             <Icon name="arrow-left" size={20} />
           </button>
-          <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="菜单">
+          <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="菜单" aria-expanded={sidebarOpen} aria-controls="chat-sidebar">
             <Icon name="menu" size={20} />
           </button>
           {/* 侧栏折叠后顶栏的展开入口（折叠态才显示） */}
@@ -508,13 +508,15 @@ export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
               onClick={() => setSidebarCollapsed(false)}
               title="展开侧边栏"
               aria-label="展开侧边栏"
+              aria-expanded={false}
+              aria-controls="chat-sidebar"
             >
               <Icon name="chevron-right" size={18} />
             </button>
           )}
           <div className="header-title">
             <h1>
-              <span className="module-chip" style={{ background: mod.color }}><Icon name={mod.icon} size={13} /> {mod.name}</span>
+              {activeSession?.title && <span className="module-chip" style={{ background: mod.color }}><Icon name={mod.icon} size={13} /> {mod.name}</span>}
               {activeSession?.title || mod.name}
             </h1>
             {intakeNote && (
@@ -539,8 +541,8 @@ export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
             </button>
           )}
           {onEnterStudy && (
-            <button className="icon-btn" onClick={onEnterStudy} title="学习中心：AI 出章节、练习与错题集" aria-label="学习中心">
-              <Icon name="book-open" size={20} />
+            <button className="header-study-btn" onClick={onEnterStudy} title="学习中心：AI 出章节、练习与错题集" aria-label="学习中心">
+              <Icon name="book-open" size={17} /><span>学习中心</span>
             </button>
           )}
         </header>
@@ -552,7 +554,7 @@ export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
               <p>正在加载记录…</p>
             </div>
           ) : messages.length === 0 && !streaming ? (
-            <EmptyState mod={mod} onIntake={isTcm ? () => setShowIntake(true) : null} onNew={newSession} onPick={pickSuggestion} />
+            <EmptyState mod={mod} onIntake={isTcm ? () => setShowIntake(true) : null} onStudy={onEnterStudy} onPick={pickSuggestion} />
           ) : (
             <div className="msg-list">
               {(hasMore || (!renderAll && messages.length > RENDER_WINDOW)) && (
@@ -648,6 +650,7 @@ export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
               </p>
             )}
             <textarea
+              aria-label={`向${mod.name}提问`}
               ref={inputRef}
               onPaste={(e) => {
                 // 粘贴图片（截图、复制的图）直接进待发队列；纯文本仍走原来的高度重算
@@ -817,12 +820,13 @@ function UserMessage({ content, localImages }) {
   );
 }
 
-function EmptyState({ mod, onIntake, onNew, onPick }) {
+function EmptyState({ mod, onIntake, onStudy, onPick }) {
   const isTcm = mod.id === 'tcm';
   return (
     <div className="empty">
       <div className="empty-logo" style={isTcm ? undefined : { background: mod.color }}>{mod.name.slice(0, 1)}</div>
-      <h2>{mod.name}</h2>
+      <span className="eyebrow">{mod.name} · 与先生对话</span>
+      <h2>今天，想了解些什么？</h2>
       <p className="empty-quote">{mod.emptyQuote}</p>
       <div className="empty-actions">
         {isTcm && onIntake && (
@@ -830,13 +834,11 @@ function EmptyState({ mod, onIntake, onNew, onPick }) {
             <Icon name="stethoscope" size={17} /> 填写问诊单
           </button>
         )}
-        <button className="btn-ghost" onClick={onNew}>
-          <Icon name="plus" size={16} /> 新对话
-        </button>
+        {onStudy && <button className="btn-ghost" onClick={onStudy}><Icon name="book-open" size={16} /> 进入学习中心</button>}
       </div>
       <div className="suggestions">
         {mod.suggestions.map((s) => (
-          <button key={s} type="button" onClick={() => onPick?.(s)} title="点击填入输入框">{s}</button>
+          <button key={s} type="button" onClick={() => onPick?.(s)} title="点击填入输入框"><span>{s}</span><Icon name="arrow-right" size={15} /></button>
         ))}
       </div>
     </div>

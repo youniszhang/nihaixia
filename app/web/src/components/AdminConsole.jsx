@@ -66,6 +66,9 @@ export default function AdminConsole({ onClose, user }) {
           {TABS.map((t) => (
             <button
               key={t.key}
+              title={t.label}
+              aria-label={t.label}
+              aria-current={tab === t.key ? 'page' : undefined}
               className={`admin-nav-item ${tab === t.key ? 'active' : ''}`}
               onClick={() => { setTab(t.key); if (t.key !== 'conversations') setConvFilter(null); if (t.key !== 'plans') setGrantFor(null); }}
             >
@@ -76,7 +79,7 @@ export default function AdminConsole({ onClose, user }) {
         </nav>
         <div className="admin-nav-foot">
           <button className="admin-nav-back" onClick={onClose}>
-            <Icon name="arrow-left" size={16} /> 返回问诊
+            <Icon name="arrow-left" size={16} /> 返回工作台
           </button>
         </div>
       </aside>

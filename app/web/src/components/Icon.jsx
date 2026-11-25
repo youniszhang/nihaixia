@@ -8,6 +8,7 @@
 // 装饰性图标统一 aria-hidden，语义交给按钮的 aria-label / 文案。
 
 const ICONS = {
+  'panel-left': <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /><path d="m15 9-3 3 3 3" /></>,
   // —— 导航 / 通用 ——
   menu: <><path d="M3 6h18" /><path d="M3 12h18" /><path d="M3 18h18" /></>,
   close: <><path d="M6 6l12 12" /><path d="M18 6L6 18" /></>,
