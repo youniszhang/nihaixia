@@ -1,166 +1,145 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
+import { canDeploy, createSystemUpdater } from '../lib/systemUpdate.js';
+import Icon from './Icon.jsx';
 
-// 服务器一键更新：打开即检查更新（实时 git fetch）→ 拉取并部署 → 轮询状态
-export default function SystemUpdate({ onClose }) {
-  const [status, setStatus] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [checking, setChecking] = useState(false);
-  const [msg, setMsg] = useState('');
-  const [err, setErr] = useState('');
-  const pollRef = useRef(null);
+const STAGES = [
+  { key: 'git', label: '拉取代码' },
+  { key: 'build', label: '构建服务' },
+  { key: 'health', label: '检查服务' },
+];
 
-  // check=true 时服务端会实时 git fetch（几秒），期间给「检查中…」反馈
-  async function loadStatus(check = false) {
-    if (check) setChecking(true);
-    try {
-      const d = await api.systemStatus(check);
-      setStatus(d);
-      if (d.enabled === false) setMsg(d.message || '未启用一键更新');
-      return d;
-    } catch (e) {
-      setErr(e.message || '获取状态失败');
-      return null;
-    } finally {
-      if (check) setChecking(false);
-    }
-  }
+function localTime(value) {
+  const date = new Date(value);
+  return value && !Number.isNaN(date.getTime())
+    ? date.toLocaleString('zh-CN', { hour12: false }) : '尚未检查';
+}
+
+export default function SystemUpdate() {
+  const [open, setOpen] = useState(false);
+  const [confirm, setConfirm] = useState(null);
+  const [view, setView] = useState({ loading: true });
+  const controller = useRef(null);
+  const dialog = useRef(null);
+  const trigger = useRef(null);
 
   useEffect(() => {
-    // 打开页面就检查一次远端版本（此前版本号永远是「—」，因为只在部署时才写入内存）
-    loadStatus(true);
-    return () => clearInterval(pollRef.current);
+    const updater = createSystemUpdater({ api, onChange: setView });
+    controller.current = updater;
+    updater.start();
+    return () => { updater.dispose(); controller.current = null; };
   }, []);
 
-  function startPolling() {
-    clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      const d = await loadStatus(false);
-      if (!d?.running) {
-        clearInterval(pollRef.current);
-        // 部署结束后再拉一次远端（部署后本地版本已变，顺便刷新对比）
-        setTimeout(() => loadStatus(true), 1500);
-      }
-    }, 4000);
-  }
+  useEffect(() => {
+    if (open) dialog.current?.showModal();
+    else if (dialog.current?.open) {
+      dialog.current.close();
+      trigger.current?.focus();
+    }
+  }, [open]);
 
-  async function doUpdate() {
-    setBusy(true); setErr(''); setMsg('正在启动部署…');
-    try {
-      const r = await api.systemUpdate();
-      setMsg(r.message || '部署已启动');
-      startPolling();
-      setTimeout(() => loadStatus(false), 2500);
-    } catch (e) {
-      setErr(e.message || '启动失败');
-    } finally { setBusy(false); }
-  }
+  const s = view.status || {};
+  const running = !view.unconfirmed && Boolean(view.pending || s.running);
+  const unavailable = s.enabled === false;
+  const problem = Boolean(view.connectionError || s.checkError || s.workspaceOk === false || view.unconfirmed || s.ok === false);
+  const blocked = view.loading || view.checking || running || s.running || Boolean(view.connectionError) || unavailable;
+  const deployable = !blocked && canDeploy(s);
+  const tone = running ? 'working' : problem ? 'warning' : s.updateAvailable ? 'new' : 'ready';
+  const label = running ? '维护进行中' : view.loading || view.checking ? '正在检查'
+    : unavailable ? '未启用更新' : s.ok === false ? '上次维护失败' : problem ? '待检查'
+    : s.updateAvailable === true ? '发现新版本' : s.updateAvailable === false ? '已是最新' : '待检查';
+  const steps = view.pending === 'restart' ? STAGES.filter((step) => step.key === 'build') : STAGES;
+  const stageIndex = steps.findIndex((step) => step.key === s.stage);
+  const failed = !running && !view.unconfirmed && s.ok === false;
+  const succeeded = !running && !view.unconfirmed && s.ok === true;
 
-  async function doRestart() {
-    setBusy(true); setErr(''); setMsg('正在重启服务…');
-    try {
-      const r = await api.systemRestart();
-      setMsg(r.message || '重启已启动');
-      startPolling();
-      setTimeout(() => loadStatus(false), 2500);
-    } catch (e) {
-      setErr(e.message || '启动失败');
-    } finally { setBusy(false); }
-  }
+  function close() { setOpen(false); setConfirm(null); }
 
-  const running = status?.running;
-  const s = status || {};
-  const upd = s.updateAvailable;
+  function outsideClick(event) {
+    if (event.target !== event.currentTarget) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close();
+  }
 
   return (
-    <div className="sheet-form">
-      <p className="admin-hint">
-        从 GitHub 拉取最新代码并重建 Docker 服务。部署过程约 1-3 分钟，期间页面可能短暂无法访问。
-        <br />（需服务器已启用 updater 容器；桌面版无此功能）
-      </p>
+    <div className="system-update-entry">
+      <button
+        ref={trigger}
+        type="button"
+        className={`system-version-trigger ${tone}`}
+        aria-label={`系统更新与部署，${label}${s.localCommit ? `，版本 ${s.localCommit}` : ''}`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={`系统更新与部署 · ${label}`}
+        onClick={() => setOpen(true)}
+      >
+        <Icon name="refresh" size={15} />
+        <span className="system-version-copy"><span className="system-version-desktop">更新与部署</span><span className="system-version-mobile">更新</span><code>{s.localCommit || label}</code></span>
+        <span className={`system-version-dot ${tone}`} aria-hidden="true" />
+        <Icon name="chevron-down" size={12} className="system-version-chevron" />
+      </button>
 
-      {s.enabled === false ? (
-        <p className="sheet-msg">{s.message}</p>
-      ) : s.error ? (
-        // updater 不可达（例如它正在自更新重建中，几秒内会恢复）
-        <p className="auth-error">{s.error}（若刚完成部署，属 updater 正在重建，稍后点「检查更新」重试）</p>
-      ) : (
-        <>
-          <div className="sys-grid">
-            <div>
-              <span>本地版本</span>
-              <code title={s.localCommit || ''}>{s.localCommit || '—'}</code>
-            </div>
-            <div>
-              <span>远端版本</span>
-              <code title={s.remoteCommit || ''}>{checking ? '检查中…' : (s.remoteCommit || '—')}</code>
-            </div>
-            <div>
-              <span>更新状态</span>
-              <strong className={upd ? 'sys-has-update' : ''}>
-                {checking ? '检查中…'
-                  : upd === true ? '有新版本可部署'
-                  : upd === false ? '已是最新'
-                  : '未知'}
-              </strong>
-            </div>
-            <div>
-              <span>运行状态</span>
-              <strong className={running ? 'sys-running' : ''}>
-                {running ? '部署中…' : (s.ok === true ? '上次部署成功' : s.ok === false ? '上次部署失败' : '就绪')}
-              </strong>
-            </div>
+      <dialog
+        ref={dialog}
+        className="system-update-dialog"
+        aria-labelledby="system-update-title"
+        onClick={outsideClick}
+        onCancel={(event) => { event.preventDefault(); close(); }}
+        onKeyDown={(event) => { if (event.key === 'Escape') event.stopPropagation(); }}
+      >
+        <header className="system-update-head">
+          <div><span className="system-update-kicker">玄枢 · 系统维护</span><h2 id="system-update-title">更新与部署</h2></div>
+          <button type="button" className="icon-btn" onClick={close} aria-label="关闭更新面板" title="关闭更新面板" autoFocus><Icon name="close" size={18} /></button>
+        </header>
+        <div className="system-update-content">
+          <div className="system-version-heading">
+            <span className={`system-status-badge ${tone}`} role="status"><span className={`system-version-dot ${tone}`} />{label}</span>
+            <button type="button" className="system-check-btn" onClick={() => { setConfirm(null); controller.current?.check(); }} disabled={view.loading || view.checking || running}>
+              <Icon name="refresh" size={14} />{view.checking ? '检查中…' : '检查更新'}
+            </button>
           </div>
 
-          {/* 工作目录异常（如重建容器时卷挂错 → /workspace 不是 git 仓库）要单独说清楚，
-              否则只会看到一句「检查远端版本失败：fatal: not a git repository」 */}
-          {s.workspaceOk === false ? (
-            <p className="auth-error">
-              服务器工作目录异常：{s.workspaceError}
-              <br />（一键更新需要 updater 容器能访问仓库目录；请检查服务器上 updater 的卷挂载，
-              或在服务器执行 <code>cd /root/nihaixia/app &amp;&amp; docker compose --profile updater up -d updater</code> 重建该容器）
-            </p>
+          <div className="system-version-pair">
+            <div><span>当前代码版本</span><code title={s.localCommit || ''}>{s.localCommit || '—'}</code></div>
+            <Icon name="arrow-right" size={17} />
+            <div><span>远端最新版本</span><code title={s.remoteCommit || ''}>{view.checking ? '检查中…' : s.remoteCommit || '—'}</code></div>
+          </div>
+          <p className="system-checked-at">{s.checkedAt ? `上次检查 ${localTime(s.checkedAt)} · 本地时间` : '检查更新后，将显示可部署的代码版本。'}</p>
+
+          {unavailable ? (
+            <div className="system-notice"><Icon name="info" size={18} /><div><strong>此环境尚未启用在线更新</strong><p>启用服务器更新服务后，即可在这里检查版本并部署。桌面版请使用安装包更新。</p></div></div>
           ) : (
             <>
-              {upd === true && !running && (
-                <p className="sys-update-tip">
-                  远端有新提交（{s.localCommit || '?'} → {s.remoteCommit || '?'}），点「拉取并部署」即可上线。
-                </p>
+              {view.connectionError && <div className="system-notice warning" role="status"><Icon name="alert" size={18} /><div><strong>{running ? '正在等待服务恢复' : '暂时无法连接更新服务'}</strong><p>{running ? '部署期间可能短暂断开连接，正在自动重试，请勿重复部署。' : view.connectionError}</p></div></div>}
+              {s.workspaceOk === false && <div className="system-notice warning" role="alert"><Icon name="alert" size={18} /><div><strong>服务器更新目录需要修复</strong><p>请检查更新服务的仓库目录与挂载配置，修复后重新检查。</p><details><summary>查看原因</summary><p>{s.workspaceError}</p></details></div></div>}
+              {s.checkError && s.workspaceOk !== false && <div className="system-notice warning" role="alert"><Icon name="alert" size={18} /><div><strong>本次版本检查未完成</strong><p>已保留上次版本信息。请重新检查成功后再部署。</p><details><summary>查看原因</summary><p>{s.checkError}</p></details></div></div>}
+              {view.unconfirmed && <div className="system-notice warning" role="status"><Icon name="info" size={18} /><div><strong>本次维护结果尚未确认</strong><p>更新服务可能已重启或等待时间较长。请检查服务与部署日志，确认结果后再操作。</p></div></div>}
+
+              {running && (
+                <section className="system-deploy-progress" aria-label="维护进度">
+                  <div className="system-progress-title" role="status"><Icon name="clock" size={16} /><strong>{view.pending === 'restart' ? '正在重启服务' : '正在更新服务'}</strong><span>请稍候</span></div>
+                  <ol className="system-deploy-steps">{steps.map((step, index) => {
+                    const done = stageIndex > index || s.stage === 'done';
+                    const active = s.stage === step.key;
+                    return <li key={step.key} className={done ? 'done' : active ? 'active' : ''} aria-current={active ? 'step' : undefined}><span>{done ? <Icon name="check" size={12} /> : index + 1}</span>{step.label}</li>;
+                  })}</ol>
+                  <p>{view.connectionError ? '保持此页面即可，连接恢复后会继续显示进度。' : s.running ? s.message : '任务已提交，正在确认服务器进度…'}</p>
+                  {s.startedAt && <small>开始于 {localTime(s.startedAt)}</small>}
+                </section>
               )}
-              {s.checkError && <p className="auth-error">检查远端版本失败：{s.checkError}</p>}
-              {!s.checkError && s.checkedAt && !checking && (
-                <p className="admin-hint">远端版本核对于 {String(s.checkedAt).replace('T', ' ').slice(0, 19)}（UTC）</p>
-              )}
+              {(failed || succeeded) && <div className={`system-notice ${failed ? 'warning' : 'success'}`} role="status"><Icon name={failed ? 'alert' : 'check-circle'} size={18} /><div><strong>{failed ? '上次维护失败' : '上次维护已完成'}</strong><p>{s.message}</p>{s.finishedAt && <small>{localTime(s.finishedAt)}</small>}{succeeded && <button type="button" className="system-reload-btn" onClick={() => window.location.reload()}>刷新页面，载入当前界面<Icon name="arrow-right" size={13} /></button>}</div></div>}
+              {view.actionError && <p className="system-action-error" role="alert">{view.actionError}</p>}
+
+              {!running && !confirm && <div className="system-deploy-action"><p>{deployable ? '新版本已就绪，可更新到服务器。' : s.updateAvailable === false && s.ok === false ? '代码已同步，上次维护失败。可在维护选项中使用当前代码重建服务。' : s.updateAvailable === false && !problem ? '代码已与远端同步，无需重复部署。' : '完成版本检查后，即可部署新版本。'}</p><button type="button" className="btn-primary" disabled={!deployable} onClick={() => setConfirm('update')}><Icon name="download" size={16} />更新并部署</button></div>}
+              {confirm && !running && <div className="system-confirm" role="group" aria-label="确认维护操作"><strong>{confirm === 'update' ? `部署新版本 ${s.remoteCommit || ''}？` : '确认重新构建并重启服务？'}</strong><p>{confirm === 'update' ? '将拉取最新代码并重建服务。' : '使用当前代码重建服务，不拉取远端更新。'}通常需要 1–3 分钟，期间访问可能短暂中断。</p><div><button type="button" className="btn-ghost" autoFocus onClick={() => setConfirm(null)}>取消</button><button type="button" className="btn-primary" disabled={confirm === 'update' ? !deployable : blocked || s.workspaceOk === false} onClick={() => { controller.current?.run(confirm); setConfirm(null); }}>{confirm === 'update' ? '确认部署' : '确认重启'}</button></div></div>}
+
+              {s.log?.length > 0 && <details className="system-log-details" key={s.startedAt || 'logs'}><summary><Icon name="file-text" size={15} /><span>部署日志</span><small>最近 {s.log.length} 条</small><Icon name="chevron-down" size={13} /></summary><pre className="system-deploy-log" tabIndex={0} aria-label="部署日志">{s.log.join('\n')}</pre></details>}
+              <details className="system-maintenance"><summary>更多维护选项<Icon name="chevron-down" size={13} /></summary><div><p>仅需重启时，使用当前代码重新构建服务，不会拉取远端更新。</p><button type="button" className="btn-ghost" disabled={blocked || s.workspaceOk === false} onClick={() => setConfirm('restart')}><Icon name="refresh" size={15} />仅重启服务</button></div></details>
             </>
           )}
-
-          {/* 初始 message 就是「就绪」，与上面的运行状态重复，只在有实质状态时显示 */}
-          {s.message && (running || s.ok != null) && (
-            <p className={s.ok === false ? 'auth-error' : 'sheet-msg'}>{s.message}</p>
-          )}
-
-          {s.log?.length > 0 && (
-            <pre className="sys-log">{s.log.join('\n')}</pre>
-          )}
-
-          <div className="sheet-actions">
-            <button type="button" className="btn-ghost" onClick={() => loadStatus(true)} disabled={checking || running}>
-              {checking ? '检查中…' : '检查更新'}
-            </button>
-            <button type="button" className="btn-ghost" onClick={doRestart} disabled={busy || running}>仅重启服务</button>
-            <button type="button" className="btn-primary" onClick={doUpdate} disabled={busy || running}>
-              {running ? '部署中…' : '拉取并部署'}
-            </button>
-          </div>
-        </>
-      )}
-
-      {msg && <p className="sheet-msg">{msg}</p>}
-      {err && <p className="auth-error">{err}</p>}
-
-      <div className="sheet-actions">
-        <button type="button" className="btn-ghost" onClick={onClose}>关闭</button>
-      </div>
+          <p className="system-update-footnote"><Icon name="info" size={13} />部署通常需要 1–3 分钟。关闭面板后，任务仍会在后台继续。</p>
+        </div>
+      </dialog>
     </div>
   );
 }

@@ -13,7 +13,7 @@ import SystemUpdate from './SystemUpdate.jsx';
 import Icon from './Icon.jsx';
 
 // 管理员独立后台：与用户界面完全分离的全屏控制台。
-// 入口在侧边栏（仅管理员可见）。标签页：概览 / 用户 / 对话 / 报表 / 订阅与额度 / 模块 / 邀请码 / 模型 / 站点 / 系统。
+// 更新入口常驻品牌区，切换管理栏目时仍能跟进后台部署。
 const TABS = [
   { key: 'dashboard', label: '概览', icon: 'chart' },
   { key: 'users', label: '用户管理', icon: 'users' },
@@ -24,7 +24,6 @@ const TABS = [
   { key: 'invites', label: '邀请码', icon: 'key' },
   { key: 'model', label: '模型设置', icon: 'settings' },
   { key: 'site', label: '站点设置', icon: 'wrench' },
-  { key: 'system', label: '系统更新', icon: 'refresh' },
 ];
 
 export default function AdminConsole({ onClose, user }) {
@@ -35,7 +34,9 @@ export default function AdminConsole({ onClose, user }) {
   const [grantFor, setGrantFor] = useState(null);
 
   useEffect(() => {
-    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    function onKey(e) {
+      if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('dialog[open]')) onClose();
+    }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
@@ -62,6 +63,7 @@ export default function AdminConsole({ onClose, user }) {
             <small>{user?.username || 'admin'}</small>
           </div>
         </div>
+        <SystemUpdate />
         <nav>
           {TABS.map((t) => (
             <button
@@ -101,7 +103,6 @@ export default function AdminConsole({ onClose, user }) {
           {tab === 'invites' && <AdminInvites />}
           {tab === 'model' && <AdminSettings onClose={onClose} />}
           {tab === 'site' && <AdminSite />}
-          {tab === 'system' && <SystemUpdate onClose={onClose} />}
         </div>
       </main>
     </div>
