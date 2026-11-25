@@ -27,6 +27,9 @@ button:disabled { cursor: not-allowed; }
 input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1; }
 .field > span { font-size: 12px; font-weight: 500; margin-bottom: 8px; }
 .field { margin-bottom: 20px; }
+.field .field-hint { margin: 7px 0 0; font-size: 11px; line-height: 1.7; color: var(--text-dim); }
+.field .field-hint-error { color: var(--red); }
+.field input[aria-invalid='true'] { border-color: var(--red); }
 .icon-btn { border-radius: 7px; }
 .portal-seal, .brand-seal { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 36px; height: 40px; border-radius: 3px 5px 3px 4px; background: var(--red); color: #fff8e9; font: 400 25px/1 var(--font-display); box-shadow: inset 0 0 0 3px var(--red), inset 0 0 0 4px rgba(255,249,227,.48); }
 
@@ -118,11 +121,14 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1
 .sidebar { width: 256px; min-width: 256px; background: var(--sidebar); }
 .sidebar-top { position: relative; padding: 28px 20px 18px; border-bottom: none; }
 .brand { gap: 12px; margin: 0 24px 26px 0; }
-.brand small { max-width: 155px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; font-size: 10px; color: #a3ada5; }
+.brand > div { min-width: 0; }
+.brand small { max-width: min(155px,100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; font-size: 10px; color: #a3ada5; }
 .brand strong { font: 500 17px var(--font-book); color: #eceadf; }
 .brand-seal { width: 32px; height: 36px; font-size: 21px; }
-.sidebar-collapse-btn { position: absolute; top: 28px; right: 11px; width: 29px; height: 29px; color: #aeb7ad; }
-.sidebar-close-btn { display: none; position: absolute; top: 28px; right: 14px; color: #d9dfd5; }
+.sidebar-top-actions { display: flex; align-items: center; gap: 8px; }
+.sidebar-collapse-btn { width: auto; height: 42px; gap: 5px; padding: 8px; font-size: 11px; color: #c0caba; border: 1px solid rgba(228,234,218,.19); }
+.sidebar-close-btn { display: none; position: absolute; top: 22px; right: 14px; width: auto; min-height: 44px; gap: 5px; padding: 8px; color: #d9dfd5; font-size: 11px; }
+.sidebar-top-actions .new-chat { flex: 1; min-width: 0; }
 .sidebar .new-chat { width: 100%; background: rgba(235,239,224,.08); color: #e0e7da; border: 1px solid rgba(228,234,218,.19); box-shadow: none; min-height: 42px; font-size: 12px; }
 .sidebar .new-chat:hover { background: rgba(235,239,224,.15); box-shadow: none; }
 .sidebar > .back-portal { justify-content: flex-start; margin: 0 20px 20px; padding: 10px 12px; border: 0; color: #b8c2b5; font-size: 12px; background: transparent; }
@@ -144,6 +150,8 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1
 .side-username { color: #bdc9b5; font-size: 11px; }
 .main { background: transparent; }
 .main-header { min-height: 72px; padding: 14px 26px; border-bottom-color: var(--border-light); background: var(--surface-glass); }
+.main-header .nav-label-btn { width: auto; gap: 6px; padding: 8px 10px; font-size: 11px; white-space: nowrap; }
+.main-header .sidebar-expand-btn, .main-header .menu-btn { border: 1px solid var(--border); background: var(--accent-soft); color: var(--action); }
 .header-title h1 { display: flex; align-items: center; gap: 12px; font-size: 12px; font-weight: 500; }
 .module-chip { border-radius: 4px; padding: 5px 9px; font-size: 10px; }
 .header-study-btn { display: inline-flex; align-items: center; gap: 7px; color: var(--action); background: var(--accent-soft); border: 1px solid var(--border); border-radius: 6px; min-height: 36px; padding: 7px 11px; font-size: 11px; white-space: nowrap; cursor: pointer; }
@@ -164,6 +172,7 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1
 .composer:focus-within { border-color: var(--jade); box-shadow: 0 0 0 3px var(--accent-soft); }
 .composer textarea { font-size: 13px; }
 .composer-notes .text-btn { font-size: 11px; padding: 6px 8px; }
+.composer .composer-keyboard-hint { margin: 0; color: var(--text-dim); font-size: 10px; line-height: 1.5; }
 .send-btn { background: var(--action); border-radius: 8px; }
 .send-btn:hover:not(:disabled) { background: var(--action-hover); }
 .disclaimer { max-width: 840px; margin: 10px auto 0; color: var(--text-dim); font-size: 10px; line-height: 1.8; }
@@ -341,12 +350,17 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1
   .sidebar { width: 270px; min-width: 270px; visibility: hidden; }
   .sidebar-visible .sidebar { visibility: visible; }
   .sidebar-close-btn { display: flex; }
-  .session-del { opacity: 1; color: #a9b49f; }
+  .sidebar .brand { margin-right: 65px; }
+  .session-del { opacity: 1; color: #a9b49f; width: 44px; height: 44px; }
+  .sidebar .side-link, .sidebar .side-logout { min-height: 44px; }
+  .sidebar .side-logout { min-width: 44px; }
   .sidebar-top { padding-top: 25px; }
   .main-header { min-height: 62px; padding: 11px 14px; gap: 5px; }
+  .main-header .icon-btn { min-width: 44px; min-height: 44px; }
+  .main-header .nav-label-btn { padding-inline: 7px; gap: 4px; }
   .header-title h1 { font-size: 11px; gap: 7px; }
   .module-chip { display: none; }
-  .header-study-btn { min-width: 36px; padding: 8px; }
+  .header-study-btn { min-width: 44px; min-height: 44px; padding: 8px; justify-content: center; }
   .header-study-btn span { display: none; }
   .empty { padding: 35px 22px; }
   .empty h2 { font-size: 29px; }
@@ -354,6 +368,8 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1
   .empty-quote { font-size: 12px; }
   .composer-wrap { padding: 10px 14px calc(12px + var(--kb-inset,0px)); }
   .composer { padding: 12px; }
+  .composer .send-btn, .composer .stop-btn { width: 44px; height: 44px; }
+  .composer-notes .text-btn { min-height: 44px; }
   .suggestions button { padding: 12px; }
   .msg-list { padding: 24px 17px; }
   .msg-body { font-size: 13px; }
@@ -414,8 +430,7 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1
   .module-lock-actions { gap: 4px; }
   .module-apply { font-size: 10px; padding: 6px 8px; }
   .portal-footer { font-size: 10px; margin-top: 24px; }
-  .main-header .quota-badge { padding: 5px 7px; }
-  .main-header > .back-btn { width: 28px; }
+  .main-header .quota-badge { display: none; }
   .empty { padding: 30px 20px; }
   .empty h2 { font-size: 26px; }
   .empty .eyebrow { font-size: 10px; }

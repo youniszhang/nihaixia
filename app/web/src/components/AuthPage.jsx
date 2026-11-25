@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/store.jsx';
 import InkLandscape from './InkLandscape.jsx';
@@ -9,6 +9,8 @@ export default function AuthPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [confirmTouched, setConfirmTouched] = useState(false);
+  const confirmRef = useRef(null);
   const [inviteCode, setInviteCode] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -43,13 +45,25 @@ export default function AuthPage() {
 
   // 什么时候需要填邀请码：注册且未开放自助注册（空库首启除外）
   const needInvite = mode === 'register' && !regOpen && !bootstrap;
+  const confirmMismatch = confirmTouched && confirm.length > 0 && password !== confirm;
+
+  function switchMode(nextMode) {
+    setMode(nextMode);
+    setErr('');
+    setConfirmTouched(false);
+  }
 
   async function onSubmit(e) {
     e.preventDefault();
+    if (busy) return;
     setErr('');
     if (mode === 'register') {
-      if (password.length < 6) return setErr('密码至少 6 位');
-      if (password !== confirm) return setErr('两次输入的密码不一致');
+      if (password.length < 6 || password.length > 72) return setErr('密码长度需 6-72 位');
+      if (password !== confirm) {
+        setConfirmTouched(true);
+        confirmRef.current?.focus();
+        return;
+      }
       if (needInvite && !inviteCode.trim()) return setErr('请填写邀请码');
     }
     setBusy(true);
@@ -78,7 +92,7 @@ export default function AuthPage() {
       </div>
 
       <div className="auth-panel">
-        <form className="auth-card" onSubmit={onSubmit}>
+        <form className="auth-card" onSubmit={onSubmit} aria-busy={busy}>
           <div className="auth-intro">
             <span className="eyebrow">欢迎来到玄枢</span>
             <h1>{mode === 'login' ? '别来无恙' : '开启问学之旅'}</h1>
@@ -86,9 +100,9 @@ export default function AuthPage() {
           </div>
           {/* 关闭注册后只剩一个页签，用 single 收窄，避免红色下划线被拉满整行 */}
           <div className={`auth-tabs ${canRegister ? '' : 'single'}`} role="tablist">
-            <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'active' : ''} onClick={() => { setMode('login'); setErr(''); }}>登录</button>
+            <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'active' : ''} onClick={() => switchMode('login')}>登录</button>
             {canRegister && (
-              <button type="button" role="tab" aria-selected={mode === 'register'} className={mode === 'register' ? 'active' : ''} onClick={() => { setMode('register'); setErr(''); }}>注册</button>
+              <button type="button" role="tab" aria-selected={mode === 'register'} className={mode === 'register' ? 'active' : ''} onClick={() => switchMode('register')}>注册</button>
             )}
           </div>
 
@@ -111,6 +125,10 @@ export default function AuthPage() {
               onChange={(e) => setUsername(e.target.value)}
               placeholder={mode === 'login' ? '用户名或邮箱' : '2-24 位中英文、数字或下划线，或邮箱'}
               autoComplete="username"
+              name="username"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               required
             />
           </label>
@@ -122,6 +140,9 @@ export default function AuthPage() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder={mode === 'login' ? '请输入密码' : '6-72 位'}
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              name="password"
+              minLength={mode === 'register' ? 6 : undefined}
+              maxLength={mode === 'register' ? 72 : undefined}
               required
             />
           </label>
@@ -133,6 +154,8 @@ export default function AuthPage() {
                 onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
                 placeholder="请输入管理员发放的邀请码"
                 autoComplete="off"
+                autoCapitalize="characters"
+                autoCorrect="off"
                 spellCheck={false}
                 required
               />
@@ -140,8 +163,24 @@ export default function AuthPage() {
           )}
           {mode === 'register' && (
             <label className="field">
-              <span>确认密码</span>
-              <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" required />
+              <span id="confirm-password-label">确认密码</span>
+              <input
+                ref={confirmRef}
+                type="password"
+                name="confirm-password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                onBlur={() => setConfirmTouched(true)}
+                placeholder="请再次输入上方密码"
+                autoComplete="new-password"
+                aria-labelledby="confirm-password-label"
+                aria-describedby="confirm-password-hint"
+                aria-invalid={confirmMismatch || undefined}
+                required
+              />
+              <small id="confirm-password-hint" className={`field-hint${confirmMismatch ? ' field-hint-error' : ''}`} aria-live="polite">
+                {confirmMismatch ? '两次密码不一致，请检查后重试。' : '再次输入密码，确保两次填写一致。'}
+              </small>
             </label>
           )}
 

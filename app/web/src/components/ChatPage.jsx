@@ -11,6 +11,7 @@ import MembershipPanel from './MembershipPanel.jsx';
 import Icon from './Icon.jsx';
 import { compressImage, IMAGE_LIMITS } from '../lib/imageCompress.js';
 import { newImageId, putImage, getImageMap, extractImageIds } from '../lib/imageStore.js';
+import { shouldSendOnEnter } from '../lib/chatKeyboard.js';
 
 const DISCLAIMER_SEEN_KEY = 'xuanshu_disclaimer_accepted_v1';
 
@@ -45,6 +46,12 @@ export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // 桌面端侧边栏折叠态（窄屏抽屉式 sidebarOpen 不受影响；折叠是纯桌面行为）
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  useEffect(() => {
+    const desktop = window.matchMedia('(min-width: 769px)');
+    const closeMobileSidebar = () => { if (desktop.matches) setSidebarOpen(false); };
+    desktop.addEventListener('change', closeMobileSidebar);
+    return () => desktop.removeEventListener('change', closeMobileSidebar);
+  }, []);
   const [showProfile, setShowProfile] = useState(false);
   const [showIntake, setShowIntake] = useState(false);
   const [showAdminConsole, setShowAdminConsole] = useState(false);
@@ -86,6 +93,8 @@ export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
   const abortRef = useRef(null);
   const scrollHostRef = useRef(null);
   const inputRef = useRef(null);
+  const sidebarExpandRef = useRef(null);
+  const sidebarCollapseRef = useRef(null);
   const inputPastedRef = useRef(false);
   // 与 streaming state 同步的真值来源（供 send 内部递归读取，见 send 里的注释）
   const streamingRef = useRef(false);
@@ -479,41 +488,50 @@ export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
         onSelect={openSession}
         onNew={newSession}
         onDelete={deleteSession}
-        onProfile={() => setShowProfile(true)}
+        onProfile={() => { setSidebarOpen(false); setShowProfile(true); }}
         user={user}
         onLogout={logout}
-        onAdminConsole={() => setShowAdminConsole(true)}
-        onMembership={() => setShowMembership(true)}
+        onAdminConsole={() => { setSidebarOpen(false); setShowAdminConsole(true); }}
+        onMembership={() => { setSidebarOpen(false); setShowMembership(true); }}
         onClose={() => setSidebarOpen(false)}
         quota={quota}
         checkedInToday={checkedInToday}
-        onCollapse={() => setSidebarCollapsed((v) => !v)}
+        onCollapse={() => {
+          setSidebarCollapsed(true);
+          requestAnimationFrame(() => sidebarExpandRef.current?.focus());
+        }}
         collapsed={sidebarCollapsed}
+        collapseButtonRef={sidebarCollapseRef}
+        mobileOpen={sidebarOpen}
       />
 
-      <main className="main">
+      <main className="main" inert={sidebarOpen ? '' : undefined} aria-hidden={sidebarOpen || undefined}>
         <header className="main-header">
           {/* 常驻返回入口：PWA 独立窗口没有浏览器返回键，窄屏侧栏又是抽屉式，
               这里给一个所有尺寸都看得见的「回到模块门户」按钮 */}
-          <button className="icon-btn back-btn" onClick={onBackToPortal} title="返回模块门户" aria-label="返回模块门户">
-            <Icon name="arrow-left" size={20} />
-          </button>
-          <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="菜单" aria-expanded={sidebarOpen} aria-controls="chat-sidebar">
-            <Icon name="menu" size={20} />
+          <button className="icon-btn menu-btn nav-label-btn" onClick={() => setSidebarOpen(true)} title="展开侧栏" aria-label="展开侧栏" aria-expanded={sidebarOpen} aria-controls="chat-sidebar">
+            <Icon name="panel-left-open" size={18} /><span>展开</span>
           </button>
           {/* 侧栏折叠后顶栏的展开入口（折叠态才显示） */}
           {sidebarCollapsed && (
             <button
-              className="icon-btn sidebar-expand-btn"
-              onClick={() => setSidebarCollapsed(false)}
-              title="展开侧边栏"
-              aria-label="展开侧边栏"
+              className="icon-btn sidebar-expand-btn nav-label-btn"
+              ref={sidebarExpandRef}
+              onClick={() => {
+                setSidebarCollapsed(false);
+                requestAnimationFrame(() => sidebarCollapseRef.current?.focus());
+              }}
+              title="展开侧栏"
+              aria-label="展开侧栏"
               aria-expanded={false}
               aria-controls="chat-sidebar"
             >
-              <Icon name="chevron-right" size={18} />
+              <Icon name="panel-left-open" size={18} /><span>展开</span>
             </button>
           )}
+          <button className="icon-btn back-btn nav-label-btn" onClick={onBackToPortal} title="返回首页，查看全部模块" aria-label="返回首页">
+            <Icon name="home" size={18} /><span>首页</span>
+          </button>
           <div className="header-title">
             <h1>
               {activeSession?.title && <span className="module-chip" style={{ background: mod.color }}><Icon name={mod.icon} size={13} /> {mod.name}</span>}
@@ -651,6 +669,7 @@ export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
             )}
             <textarea
               aria-label={`向${mod.name}提问`}
+              aria-describedby="chat-keyboard-hint"
               ref={inputRef}
               onPaste={(e) => {
                 // 粘贴图片（截图、复制的图）直接进待发队列；纯文本仍走原来的高度重算
@@ -673,7 +692,7 @@ export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+                if (shouldSendOnEnter(e)) { e.preventDefault(); send(); }
               }}
               placeholder={activeId ? mod.placeholder || `向「${mod.name}」提问…` : mod.emptyHint || `开始你的「${mod.name}」对话…`}
               rows={1}
@@ -718,6 +737,7 @@ export default function ChatPage({ module, onBackToPortal, onEnterStudy }) {
                 </button>
               )}
             </div>
+            <p id="chat-keyboard-hint" className="composer-keyboard-hint">Enter 发送 · Shift + Enter 换行</p>
           </div>
           <p className="disclaimer">
             {mod.disclaimer}<br />
