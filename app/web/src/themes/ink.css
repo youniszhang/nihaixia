@@ -40,22 +40,38 @@ html[data-theme='ink'] .module-card,
 html[data-theme='ink'] .auth-card,
 html[data-theme='ink'] .msg.assistant .msg-body,
 html[data-theme='ink'] .study-main .card {
-  background: rgba(248, 244, 234, 0.88);
-  border: 3px double rgba(43, 51, 62, 0.4);
-  border-radius: 2px;
+  background: rgba(248, 244, 234, 0.9);
+  border: 1px solid rgba(61, 55, 47, 0.22);
+  border-radius: 4px;
+  box-shadow: 0 1px 4px rgba(21, 29, 41, 0.06);
+}
+
+/* 输入框：淡墨细边 + 纸面底 */
+html[data-theme='ink'] .field input:not([type="radio"]):not([type="checkbox"]),
+html[data-theme='ink'] .field select,
+html[data-theme='ink'] .field textarea {
+  border: 1px solid rgba(61, 55, 47, 0.28);
+  background: rgba(255, 253, 247, 0.85);
+  color: var(--text);
+  box-shadow: none;
+}
+html[data-theme='ink'] .field input:focus,
+html[data-theme='ink'] .field textarea:focus {
+  border-color: var(--jade);
+  box-shadow: 0 0 0 2px rgba(34, 62, 54, 0.12);
 }
 
 /* 按钮：shuimo 式菘蓝底 + 双线 */
 html[data-theme='ink'] .btn-primary {
   background: var(--amber);
-  border: 5px double #E6E2D8;
-  border-radius: 2px;
+  border: 4px double rgba(255, 253, 247, 0.9);
+  border-radius: 3px;
   color: #F5F3EC;
 }
 html[data-theme='ink'] .btn-primary:hover { background: var(--amber-light); }
 html[data-theme='ink'] .btn-ghost {
-  border: 3px double rgba(43, 51, 62, 0.45);
-  border-radius: 2px;
+  border: 1px solid rgba(61, 55, 47, 0.3);
+  border-radius: 3px;
   color: var(--text);
   background: rgba(248, 244, 234, 0.6);
 }
@@ -90,3 +106,7 @@ html[data-theme='ink'] .main-header { background: rgba(228, 223, 211, 0.9); back
 html[data-theme='ink'] .study-header { background: rgba(248, 244, 234, 0.9); }
 html[data-theme='ink'] .quota-badge { background: rgba(224, 216, 198, 0.8); color: var(--text); }
 html[data-theme='ink'] .study-tabs button.on { background: rgba(224, 216, 198, 0.8); }
+
+/* 登录页：外层容器透明、卡片独立 */
+html[data-theme='ink'] .auth-wrap,
+html[data-theme='ink'] .auth-page { background: transparent; }
